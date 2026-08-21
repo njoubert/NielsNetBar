@@ -45,7 +45,8 @@ the choice (`--hz N` overrides it for one run).
 second, blue ↑ growing up from the baseline and green ↓ growing down, on one linear scale set
 by the window's peak (labelled). It records from launch, so it is full the first time you
 open the menu, and keeps moving while the menu is open; hover a bar for that second's
-numbers.
+numbers. Under it, bytes moved since launch and the **public IPv4/IPv6** (looked up via
+[ipify](https://www.ipify.org) when the menu opens — never polled — and cached for a minute).
 
 Then one block per interface, primary first, then connected → idle → down, in the order of
 System Settings › Network:
@@ -62,9 +63,8 @@ MAC, and for Wi-Fi the **SSID** and security, **signal** (RSSI / noise / SNR), c
 width and PHY mode. The primary interface also shows the **gateway** and **DNS** servers.
 **Click any row to copy its value** (IP, SSID, MAC, …).
 
-Below that: bytes moved since launch, the **public IPv4/IPv6** (looked up via
-[ipify](https://www.ipify.org) when the menu opens — never polled — and cached for a minute),
-the update-rate submenu, a **Launch at Login** checkbox, a shortcut to Network Settings, Quit.
+Below that: the update-rate submenu, a **Launch at Login** checkbox, a shortcut to Network
+Settings, Quit.
 
 Hardware ports come from System Configuration (the same list as System Settings, so a
 Mac Studio shows its four Thunderbolt ports, grey until something is plugged in). VPN

@@ -147,17 +147,6 @@ final class StatusBarController: NSObject, NSMenuDelegate {
         let chartItem = NSMenuItem()
         chartItem.view = chart
         menu.addItem(chartItem)
-
-        if snapshot.interfaces.isEmpty {
-            menu.addItem(disabled("No network interfaces found"))
-        }
-        var lastWasCompact = false
-        for iface in snapshot.interfaces {
-            let compact = iface.dot == .gray
-            if !compact || !lastWasCompact { if menu.items.count > 0 { menu.addItem(.separator()) } }
-            addInterface(iface)
-            lastWasCompact = compact
-        }
         menu.addItem(.separator())
 
         // Totals + public IP.
@@ -175,6 +164,17 @@ final class StatusBarController: NSObject, NSMenuDelegate {
         menu.addItem(v4); menu.addItem(v6)
         publicV4Row = v4; publicV6Row = v6
         updatePublicIPRows()
+
+        if snapshot.interfaces.isEmpty {
+            menu.addItem(disabled("No network interfaces found"))
+        }
+        var lastWasCompact = false
+        for iface in snapshot.interfaces {
+            let compact = iface.dot == .gray
+            if !compact || !lastWasCompact { if menu.items.count > 0 { menu.addItem(.separator()) } }
+            addInterface(iface)
+            lastWasCompact = compact
+        }
         menu.addItem(.separator())
 
         // Settings.
