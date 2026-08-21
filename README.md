@@ -11,7 +11,7 @@
 </p>
 
 <p align="center">
-  <img src="docs/screenshot.png" alt="NielsNetBar: stacked upload/download rates in the menu bar, and the dropdown listing each interface with a status dot, rates, addresses, link speed, Wi-Fi details, gateway and DNS" width="520">
+  <img src="docs/screenshot.png" alt="NielsNetBar: stacked upload/download rates in the menu bar, and the dropdown listing each interface with a status dot, rates, addresses, link speed, Wi-Fi details, gateway and DNS" width="434">
 </p>
 
 ```
