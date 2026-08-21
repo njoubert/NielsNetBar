@@ -42,7 +42,7 @@ Sampled at 2 Hz by default; **Update Rate** in the menu offers 1 / 2 / 5 Hz and 
 the choice (`--hz N` overrides it for one run).
 
 **In the dropdown** — first the total with a **chart of the last 60 seconds**: one bar per
-second, green ↓ growing up from the baseline and blue ↑ growing down, on one linear scale set
+second, blue ↑ growing up from the baseline and green ↓ growing down, on one linear scale set
 by the window's peak (labelled). It records from launch, so it is full the first time you
 open the menu, and keeps moving while the menu is open; hover a bar for that second's
 numbers.

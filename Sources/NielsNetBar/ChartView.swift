@@ -1,7 +1,7 @@
 import AppKit
 
 /// The throughput history chart at the top of the menu: one bar per second for the last
-/// minute, mirrored around a baseline — green ↓ grows up, blue ↑ grows down — on a single
+/// minute, mirrored around a baseline — blue ↑ grows up, green ↓ grows down — on a single
 /// linear scale set by the window's peak. Hovering a bar shows that second's numbers.
 final class ChartView: NSView {
 
@@ -101,10 +101,11 @@ final class ChartView: NSView {
             let alpha: CGFloat = hoverIndex == nil ? 0.85 : (hovered ? 1 : 0.6)
             let down = max(2, half * CGFloat(r.down / peak))
             let up = max(2, half * CGFloat(r.up / peak))
-            StatusBarController.downColor.withAlphaComponent(r.down > 0 ? alpha : 0.25).setFill()
-            roundedTop(NSRect(x: x, y: baseline + 1, width: bw, height: down), up: true).fill()
+            // Blue ↑ upload rises above the baseline; green ↓ download hangs below it.
             StatusBarController.upColor.withAlphaComponent(r.up > 0 ? alpha : 0.25).setFill()
-            roundedTop(NSRect(x: x, y: baseline - 1 - up, width: bw, height: up), up: false).fill()
+            roundedTop(NSRect(x: x, y: baseline + 1, width: bw, height: up), up: true).fill()
+            StatusBarController.downColor.withAlphaComponent(r.down > 0 ? alpha : 0.25).setFill()
+            roundedTop(NSRect(x: x, y: baseline - 1 - down, width: bw, height: down), up: false).fill()
         }
 
         // Peak label, top-right; hover readout, top-left.
