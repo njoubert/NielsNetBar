@@ -1,3 +1,5 @@
+// Copyright (C) 2026 Niels Joubert
+// SPDX-License-Identifier: GPL-3.0-or-later
 import AppKit
 
 /// The throughput history chart at the top of the menu: one bar per second for the last

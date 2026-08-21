@@ -7,6 +7,8 @@
 #                           instead (logs in this terminal, Ctrl-C quits).
 #   ./build.sh stop         quit every running NielsNetBar (dev or installed)
 #   ./build.sh app          release build → dist/NielsNetBar.app (ad-hoc signed, icon baked in)
+#   ./build.sh dmg          release build → dist/NielsNetBar-<version>.dmg, the drag-to-Applications
+#                           disk image (background drawn by Sources/NielsNetBar/DMGBackground.swift)
 #   ./build.sh install      release build → /Applications/NielsNetBar.app (replacing any older
 #                           copy), launch it, and register it to launch at login
 #   ./build.sh uninstall    unregister the login item, quit, delete /Applications/NielsNetBar.app
@@ -25,6 +27,7 @@ INSTALL_DIR=/Applications
 INSTALLED="$INSTALL_DIR/$NAME.app"
 DEV_APP="dist/debug/$NAME.app"
 REL_APP="dist/$NAME.app"
+DMG="dist/$NAME-$VERSION.dmg"
 
 # --- helpers -----------------------------------------------------------------------------
 
@@ -40,6 +43,7 @@ make_bundle() {
   rm -rf "$app"
   mkdir -p "$app/Contents/MacOS" "$app/Contents/Resources"
   cp "$bin" "$app/Contents/MacOS/$NAME"
+  cp LICENSE "$app/Contents/Resources/LICENSE"
 
   # The icon is drawn in code; render it to an .iconset and let iconutil pack it.
   local iconset="dist/$config-AppIcon.iconset"
@@ -72,6 +76,76 @@ PLIST
   plutil -convert xml1 -o /dev/null "$app/Contents/Info.plist"   # validate (plutil -lint misparses here)
   codesign --force --sign - --identifier "$BUNDLE_ID" "$app" >/dev/null 2>&1 || warn "codesign failed (continuing unsigned)"
   note "bundled $app"
+}
+
+# Wrap dist/NielsNetBar.app in the usual drag-to-Applications disk image: the app, an
+# Applications alias, and a background picture that says what to do and what to expect.
+# Finder keeps icon positions / background / window size in the volume's .DS_Store, and the
+# only supported way to write that is to ask Finder — hence the AppleScript (the first run
+# prompts for permission to control Finder).
+#   make_dmg <app> <out.dmg>
+make_dmg() {
+  local app=$1 out=$2 bin="$1/Contents/MacOS/$NAME"
+  local staging="dist/dmg-staging" rw="dist/$NAME-rw.dmg" vol="/Volumes/$NAME"
+
+  rm -rf "$staging" "$rw"
+  mkdir -p "$staging/.background"
+  ditto "$app" "$staging/$NAME.app"
+  ln -s /Applications "$staging/Applications"
+  cp LICENSE "$staging/.LICENSE"    # hidden: present, but not a third icon to drag
+  "$bin" --render-dmg-background "$staging/.background" >/dev/null
+  # One TIFF holding the 1× and 2× renders, so Finder picks the sharp one on Retina.
+  tiffutil -cathidpicheck "$staging/.background/background.png" "$staging/.background/background@2x.png" \
+    -out "$staging/.background/background.tiff" >/dev/null 2>&1
+  rm "$staging/.background/background.png" "$staging/.background/background@2x.png"
+
+  # A stale mount from an earlier run would make this one land on "/Volumes/$NAME 1".
+  [ -d "$vol" ] && hdiutil detach "$vol" -quiet -force || true
+  hdiutil create -volname "$NAME" -srcfolder "$staging" -ov -format UDRW -fs HFS+ -quiet "$rw"
+  local dev
+  dev=$(hdiutil attach -readwrite -noverify -noautoopen "$rw" | awk '/^\/dev\// {print $1; exit}')
+  [ -d "$vol" ] || { warn "mount failed"; hdiutil detach "$dev" -quiet || true; return 1; }
+
+  # Geometry matches DMGBackground.swift: 640×440 window, icon centres at (170,210) / (470,210).
+  osascript >/dev/null <<APPLESCRIPT
+tell application "Finder"
+  tell disk "$NAME"
+    open
+    set current view of container window to icon view
+    set toolbar visible of container window to false
+    set statusbar visible of container window to false
+    set pathbar visible of container window to false
+    -- Finder remembers the (hidden) sidebar's width and adds it back on reopen unless zeroed.
+    set sidebar width of container window to 0
+    -- bounds include the 28 pt title bar.
+    set the bounds of container window to {200, 120, 840, 588}
+    set opts to the icon view options of container window
+    set arrangement of opts to not arranged
+    set icon size of opts to 128
+    set text size of opts to 12
+    set label position of opts to bottom
+    set background picture of opts to file ".background:background.tiff"
+    set position of item "$NAME.app" of container window to {170, 210}
+    set position of item "Applications" of container window to {470, 210}
+    close
+    open
+    set sidebar width of container window to 0
+    set the bounds of container window to {200, 120, 840, 588}
+    update without registering applications
+    delay 1
+    close
+  end tell
+end tell
+APPLESCRIPT
+  sync
+  rm -rf "$vol/.fseventsd"
+  chmod -Rf go-w "$vol" || true
+  hdiutil detach "$dev" -quiet
+  rm -f "$out"
+  hdiutil convert "$rw" -format UDZO -imagekey zlib-level=9 -quiet -o "$out"
+  rm -rf "$rw" "$staging"
+  codesign --force --sign - "$out" >/dev/null 2>&1 || true
+  note "packed $out ($(du -h "$out" | cut -f1))"
 }
 
 # Quit every running copy and wait for it to go away.
@@ -119,6 +193,14 @@ case "$cmd" in
     swift build -c release
     make_bundle release "$REL_APP"
     say "built $REL_APP"
+    ;;
+
+  dmg)
+    swift build -c release
+    make_bundle release "$REL_APP"
+    make_dmg "$REL_APP" "$DMG"
+    say "built $DMG"
+    note "Test it: open $DMG"
     ;;
 
   install)

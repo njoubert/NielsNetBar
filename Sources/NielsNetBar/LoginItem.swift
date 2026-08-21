@@ -1,3 +1,5 @@
+// Copyright (C) 2026 Niels Joubert
+// SPDX-License-Identifier: GPL-3.0-or-later
 import Foundation
 import ServiceManagement
 
@@ -8,6 +10,10 @@ import ServiceManagement
 /// the installed copy with `--enable-login-item`, and `uninstall` runs it with
 /// `--disable-login-item` before deleting it (otherwise a dangling entry is left behind).
 enum LoginItem {
+    /// Set once the app has registered itself (first launch from /Applications, or
+    /// `--enable-login-item`) or the user has toggled it — after that, never auto-register again.
+    static let registeredDefaultsKey = "loginItemRegistered"
+
     static var status: SMAppService.Status { SMAppService.mainApp.status }
     static var isEnabled: Bool { status == .enabled }
 

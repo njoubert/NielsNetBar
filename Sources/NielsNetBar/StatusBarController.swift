@@ -1,3 +1,5 @@
+// Copyright (C) 2026 Niels Joubert
+// SPDX-License-Identifier: GPL-3.0-or-later
 import AppKit
 
 /// The status item (two stacked lines of throughput) and its dropdown menu.
@@ -496,6 +498,7 @@ final class StatusBarController: NSObject, NSMenuDelegate {
 
     @objc private func toggleLogin(_ sender: NSMenuItem) {
         let turnOn = !LoginItem.isEnabled
+        UserDefaults.standard.set(true, forKey: LoginItem.registeredDefaultsKey)   // the user decided; never auto-register again
         do {
             try LoginItem.setEnabled(turnOn)
         } catch {

@@ -21,11 +21,20 @@
 ./build.sh uninstall      # remove the Login Item, the app, and its preferences
 ./build.sh status         # running? installed? login item?
 ./build.sh app            # release build → dist/NielsNetBar.app only
+./build.sh dmg            # release build → dist/NielsNetBar-1.0.dmg, drag-to-Applications disk image
 ./build.sh icon           # re-render docs/icon.png
 ./build.sh screenshot     # re-render docs/screenshot.png
 ```
 
 Re-running `install` replaces whatever is in `/Applications` with the current build.
+
+To hand it to someone else, `./build.sh dmg` makes the usual disk image: the app, an
+Applications folder to drag it onto, and a background that says what to expect — the
+first launch from `/Applications` registers the Login Item (once; turning it off later
+sticks) and asks for Location access for the SSID. The build is ad-hoc signed, not
+notarized, so a copy that arrives with a quarantine flag (browser download, AirDrop)
+is refused at first open and has to be allowed in System Settings › Privacy & Security
+("Open Anyway"); a copy that comes over scp or a USB stick opens straight away.
 
 ## What it shows
 
@@ -99,7 +108,11 @@ Loopback, AirDrop's `awdl`/`llw`, bridges and the like are never shown.
   throughput trace. `build.sh` renders it to an `.iconset` → `.icns` when it bundles the app.
 * `LoginItem.swift` — `SMAppService.mainApp`. The app registers *itself*, so `build.sh
   install` launches the installed copy with `--enable-login-item`, and `uninstall` runs it
-  with `--disable-login-item` before deleting it.
+  with `--disable-login-item` before deleting it. A copy dragged in from the disk image
+  registers on its first launch from `/Applications` instead; either way a
+  `loginItemRegistered` default is set so it happens once and a later "off" is respected.
+* `DMGBackground.swift` — the disk image's background picture, drawn in code like the icon
+  (`build.sh dmg` renders it at 1× and 2× into one TIFF and lets Finder lay out the window).
 * `main.swift` — flag parsing, the `NSApplicationDelegate`, and a few debug flags:
   `--print` (the menu's data as text), `--dump-bar PATH` (the bar image), `--dump-chart PATH`
   (the chart with fake data), `--screenshot PATH`.
@@ -129,3 +142,11 @@ Loopback, AirDrop's `awdl`/`llw`, bridges and the like are never shown.
 
 macOS 15+, Xcode 16+ / Swift 5.10+ toolchain (Command Line Tools are enough — pure SwiftPM,
 no Xcode project). Apple Silicon or Intel.
+
+## License
+
+NielsNetBar — everything in this directory (`shared/niels-net-bar/`) — is free software
+under the [GNU General Public License, version 3 or later](LICENSE). Use it, change it,
+ship it, sell it — but anything built from it has to be released under the same terms,
+with source. That covers only this utility: the rest of the repository it lives in (my
+dotfiles) is not licensed for reuse.

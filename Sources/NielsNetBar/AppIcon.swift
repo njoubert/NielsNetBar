@@ -1,3 +1,5 @@
+// Copyright (C) 2026 Niels Joubert
+// SPDX-License-Identifier: GPL-3.0-or-later
 import Foundation
 import AppKit
 import CoreGraphics
@@ -22,9 +24,11 @@ enum AppIcon {
         let body = CGRect(x: bodyInset, y: bodyInset, width: ref - 2 * bodyInset, height: ref - 2 * bodyInset)
         let shape = CGPath(roundedRect: body, cornerWidth: bodyRadius, cornerHeight: bodyRadius, transform: nil)
 
-        // Shadow, as macOS icons carry their own.
+        // Shadow, as macOS icons carry their own. Kept small enough to fade out inside the
+        // canvas: a shadow that is still visible at the edge gets clipped to a hard line,
+        // which shows as a grey box on light backgrounds (e.g. the disk image window).
         ctx.saveGState()
-        ctx.setShadow(offset: CGSize(width: 0, height: -18), blur: 44,
+        ctx.setShadow(offset: CGSize(width: 0, height: -12), blur: 28,
                       color: NSColor(calibratedWhite: 0, alpha: 0.45).cgColor)
         ctx.addPath(shape); ctx.setFillColor(NSColor.black.cgColor); ctx.fillPath()
         ctx.restoreGState()

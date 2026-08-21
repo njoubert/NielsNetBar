@@ -1,3 +1,5 @@
+// Copyright (C) 2026 Niels Joubert
+// SPDX-License-Identifier: GPL-3.0-or-later
 import AppKit
 
 // NielsNetBar — a menu bar network throughput monitor. See README.md.
@@ -9,6 +11,7 @@ import AppKit
 //   --login-item-status     print the Login Item state and exit
 //   --render-icon PATH [--size PX]   write the app icon as a PNG and exit
 //   --render-iconset DIR    write an .iconset (for iconutil) and exit
+//   --render-dmg-background DIR   write the disk image's background PNGs (1× and 2×) and exit
 //   --screenshot PATH       open the menu, capture it to PATH, quit (for the README)
 //   --dump-bar PATH         render just the status item to PATH, quit (layout check)
 //   --dump-chart PATH       render the history chart with fake data to PATH, quit
@@ -33,6 +36,7 @@ var options = Options()
 var renderIconPath: String?
 var renderIconSize = 1024
 var renderIconsetDir: String?
+var renderDMGBackgroundDir: String?
 
 var args = Array(CommandLine.arguments.dropFirst())
 func takeValue(_ flag: String) -> String {
@@ -56,6 +60,7 @@ while !args.isEmpty {
     case "--render-icon": renderIconPath = takeValue(a)
     case "--size": renderIconSize = Int(takeValue(a)) ?? 1024
     case "--render-iconset": renderIconsetDir = takeValue(a)
+    case "--render-dmg-background": renderDMGBackgroundDir = takeValue(a)
     case "--screenshot": options.screenshotPath = takeValue(a)
     case "--dump-bar": options.dumpBarPath = takeValue(a)
     case "--dump-chart":
@@ -117,6 +122,11 @@ if let dir = renderIconsetDir {
     catch { fputs("iconset: \(error)\n", stderr); exit(1) }
     exit(0)
 }
+if let dir = renderDMGBackgroundDir {
+    do { try DMGBackground.write(to: dir); print("wrote \(dir)") }
+    catch { fputs("dmg background: \(error)\n", stderr); exit(1) }
+    exit(0)
+}
 if let path = renderIconPath {
     guard let data = AppIcon.pngData(px: renderIconSize) else { fputs("icon render failed\n", stderr); exit(1) }
     do { try data.write(to: URL(fileURLWithPath: path)); print("wrote \(path) (\(renderIconSize)×\(renderIconSize))") }
@@ -143,9 +153,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         statusBar = StatusBarController(monitor: monitor)
         monitor.start()
 
-        if options.enableLoginItem {
+        // Login Item. `build.sh install` passes --enable-login-item; a drag-install from the
+        // disk image has nobody to pass it, so the first launch from /Applications registers
+        // too. Once only — the flag is then set, so turning it off later (menu, System
+        // Settings) sticks across relaunches and updates.
+        let installed = Bundle.main.bundlePath.hasPrefix("/Applications/")
+        let registered = UserDefaults.standard.bool(forKey: LoginItem.registeredDefaultsKey)
+        if options.enableLoginItem || (installed && !registered) {
             do { try LoginItem.setEnabled(true); NSLog("login item: \(LoginItem.statusDescription)") }
             catch { NSLog("could not register login item: \(error)") }
+            UserDefaults.standard.set(true, forKey: LoginItem.registeredDefaultsKey)
         }
 
         // The SSID needs Location access. Ask once, automatically, but only for the installed
