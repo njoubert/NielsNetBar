@@ -15,7 +15,7 @@ final class StatusBarController: NSObject, NSMenuDelegate {
 
     // Rows that update live while the menu is open.
     private var totalRow: NSMenuItem?
-    private let chart = ChartView(frame: NSRect(x: 0, y: 0, width: 448, height: ChartView.chartHeight))
+    private let chart = ChartView(frame: NSRect(x: 0, y: 0, width: 384, height: ChartView.chartHeight))
     private var rateRows: [String: NSMenuItem] = [:]
     private var totalsRow: NSMenuItem?
     private var publicV4Row: NSMenuItem?
@@ -224,7 +224,7 @@ final class StatusBarController: NSObject, NSMenuDelegate {
         title.append(NSAttributedString(string: "  \(iface.bsdName)", attributes: [
             .font: NSFont.menuFont(ofSize: 0), .foregroundColor: NSColor.secondaryLabelColor]))
         if iface.isPrimary {
-            title.append(NSAttributedString(string: "  ·  primary", attributes: [
+            title.append(NSAttributedString(string: " · primary", attributes: [
                 .font: NSFont.menuFont(ofSize: 0).withWeight(.medium), .foregroundColor: NSColor.controlAccentColor]))
         }
         if iface.dot == .gray {
@@ -271,7 +271,7 @@ final class StatusBarController: NSObject, NSMenuDelegate {
         if iface.kind == .wifi, let w = iface.wifi {
             if let ssid = w.ssid {
                 var v = ssid
-                if let s = w.security { v += "  ·  \(s)" }
+                if let s = w.security { v += " · \(s)" }
                 menu.addItem(row(label: "SSID", value: v, copy: ssid))
             } else if LocationAccess.shared.isAuthorized {
                 menu.addItem(row(label: "SSID", value: "unavailable", copy: nil))
@@ -286,15 +286,17 @@ final class StatusBarController: NSObject, NSMenuDelegate {
             }
             if let bssid = w.bssid { menu.addItem(row(label: "BSSID", value: bssid, copy: bssid)) }
             menu.addItem(row(label: "Signal",
-                             value: "\(w.rssi) dBm  ·  noise \(w.noise) dBm  ·  SNR \(w.rssi - w.noise) dB",
+                             value: "\(w.rssi) dBm · noise \(w.noise) dBm · SNR \(w.rssi - w.noise) dB",
                              copy: "\(w.rssi) dBm"))
             var link: [String] = []
             if w.txRate > 0 { link.append(Format.linkSpeed(bitsPerSecond: UInt64(w.txRate * 1_000_000))) }
-            if let c = w.channel { link.append("ch \(c)") }
-            if let b = w.band { link.append(b) }
-            if let wd = w.width { link.append(wd) }
             if let p = w.phyMode { link.append(p) }
-            menu.addItem(row(label: "Link", value: link.joined(separator: "  ·  "), copy: link.first))
+            if !link.isEmpty { menu.addItem(row(label: "Link", value: link.joined(separator: " · "), copy: link.first)) }
+            var chan: [String] = []
+            if let c = w.channel { chan.append("\(c)") }
+            if let b = w.band { chan.append(b) }
+            if let wd = w.width { chan.append(wd) }
+            if !chan.isEmpty { menu.addItem(row(label: "Channel", value: chan.joined(separator: " · "), copy: chan.first)) }
         } else if let speed = iface.linkSpeed {
             let s = Format.linkSpeed(bitsPerSecond: speed)
             menu.addItem(row(label: "Link", value: s, copy: s))
@@ -307,7 +309,7 @@ final class StatusBarController: NSObject, NSMenuDelegate {
             var gw: [String] = []
             if let g = iface.gateway { gw.append(g) }
             if let g6 = iface.gateway6 { gw.append(g6) }
-            if !gw.isEmpty { menu.addItem(row(label: "Gateway", value: gw.joined(separator: "  ·  "), copy: gw.first)) }
+            if !gw.isEmpty { menu.addItem(row(label: "Gateway", value: gw.joined(separator: " · "), copy: gw.first)) }
             if !iface.dns.isEmpty {
                 menu.addItem(row(label: "DNS", value: iface.dns.joined(separator: ", "), copy: iface.dns.joined(separator: " ")))
             }

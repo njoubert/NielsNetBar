@@ -5,7 +5,7 @@ import AppKit
 /// linear scale set by the window's peak. Hovering a bar shows that second's numbers.
 final class ChartView: NSView {
 
-    static let chartHeight: CGFloat = 96
+    static let chartHeight: CGFloat = 128
     private static let insetX: CGFloat = 14     // lines up with the menu rows' text
     private static let insetY: CGFloat = 5
     private static let gap: CGFloat = 1
