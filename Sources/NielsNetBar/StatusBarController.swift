@@ -1,0 +1,428 @@
+import AppKit
+
+/// The status item (two stacked lines of throughput) and its dropdown menu.
+@MainActor
+final class StatusBarController: NSObject, NSMenuDelegate {
+
+    static let hzOptions: [Double] = [1, 2, 5]
+    static let hzDefaultsKey = "updateHz"
+
+    private let item: NSStatusItem
+    private let menu = NSMenu()
+    private let monitor: NetworkMonitor
+    private var snapshot = NetworkSnapshot()
+    private var menuOpen = false
+
+    // Rows that update live while the menu is open.
+    private var rateRows: [String: NSMenuItem] = [:]
+    private var totalsRow: NSMenuItem?
+    private var publicV4Row: NSMenuItem?
+    private var publicV6Row: NSMenuItem?
+
+    init(monitor: NetworkMonitor) {
+        self.monitor = monitor
+        item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
+        super.init()
+        menu.delegate = self
+        menu.autoenablesItems = false
+        item.menu = menu
+        item.button?.toolTip = "NielsNetBar — network throughput"
+        monitor.onTick = { [weak self] in self?.tick() }
+        PublicIP.shared.onChange = { [weak self] in self?.updatePublicIPRows() }
+        LocationAccess.shared.onChange = { [weak self] in
+            guard let self, self.menuOpen else { return }
+            self.rebuild()
+        }
+        updateBar()
+    }
+
+    /// The frame of the status item on screen (for `--screenshot`).
+    var buttonScreenFrame: CGRect? {
+        guard let b = item.button, let w = b.window else { return nil }
+        return w.convertToScreen(b.convert(b.bounds, to: nil))
+    }
+
+    /// Render the status button itself (for checking the two-line layout without a screen grab).
+    func dumpBar(to path: String) -> Bool {
+        guard let b = item.button, let rep = b.bitmapImageRepForCachingDisplay(in: b.bounds) else { return false }
+        b.cacheDisplay(in: b.bounds, to: rep)
+        guard let data = rep.representation(using: .png, properties: [:]) else { return false }
+        return (try? data.write(to: URL(fileURLWithPath: path))) != nil
+    }
+
+    func openMenu() { item.button?.performClick(nil) }
+    func closeMenu() { menu.cancelTracking() }
+
+    // MARK: Bar
+
+    private static let barFont = NSFont.monospacedSystemFont(ofSize: 9, weight: .medium)
+    private static let barLineHeight: CGFloat = 10.5   // two lines → 21 pt inside the 22 pt bar
+    /// Grey digits: a fixed mid-grey per appearance rather than the label colour with alpha,
+    /// which on a dark bar comes out nearly white. Tune the two `white:` values to taste.
+    private static let barTextColor = NSColor(name: nil) { appearance in
+        appearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
+            ? NSColor(white: 0.55, alpha: 1)
+            : NSColor(white: 0.40, alpha: 1)
+    }
+
+    static let downColor = NSColor.systemGreen
+    static let upColor = NSColor.systemBlue
+
+    /// The bar shows ↑ upload on top and ↓ download below. The two lines are rendered into an
+    /// image rather than set as a multi-line title: NSStatusBarButton centres a single line
+    /// and lets a second one hang off the bottom, whereas an image is centred as a block.
+    /// Green ↓ / blue ↑; the digits are grey, resolved at draw time against the bar's
+    /// light/dark appearance (`barTextColor`).
+    private func updateBar() {
+        let font = StatusBarController.barFont
+        let text = StatusBarController.barTextColor
+        func line(_ arrow: String, _ color: NSColor, _ value: String) -> NSAttributedString {
+            let s = NSMutableAttributedString(string: arrow, attributes: [.font: font, .foregroundColor: color])
+            s.append(NSAttributedString(string: " " + value, attributes: [.font: font, .foregroundColor: text]))
+            return s
+        }
+        let lines = [
+            line("↑", StatusBarController.upColor, Format.rateFixed(bitsPerSecond: monitor.total.up)),
+            line("↓", StatusBarController.downColor, Format.rateFixed(bitsPerSecond: monitor.total.down)),
+        ]
+        let lh = StatusBarController.barLineHeight
+        let width = ceil(lines.map { $0.size().width }.max() ?? 0) + 2
+        let image = NSImage(size: NSSize(width: width, height: lh * 2), flipped: true) { _ in
+            for (i, l) in lines.enumerated() { l.draw(at: NSPoint(x: 1, y: CGFloat(i) * lh)) }
+            return true
+        }
+        image.isTemplate = false
+        item.button?.image = image
+        item.button?.imagePosition = .imageOnly
+        item.button?.title = ""
+    }
+
+    private func tick() {
+        updateBar()
+        guard menuOpen else { return }
+        for (bsd, row) in rateRows {
+            row.attributedTitle = rateTitle(bsd)
+        }
+        totalsRow?.attributedTitle = totalsTitle()
+    }
+
+    // MARK: Menu lifecycle
+
+    func menuNeedsUpdate(_ menu: NSMenu) {
+        rebuild()
+    }
+
+    func menuWillOpen(_ menu: NSMenu) {
+        menuOpen = true
+    }
+
+    func menuDidClose(_ menu: NSMenu) {
+        menuOpen = false
+    }
+
+    private func rebuild() {
+        menu.removeAllItems()
+        rateRows = [:]
+        totalsRow = nil
+        publicV4Row = nil
+        publicV6Row = nil
+
+        snapshot = Interfaces.snapshot()
+        PublicIP.shared.refreshIfStale()
+
+        if snapshot.interfaces.isEmpty {
+            menu.addItem(disabled("No network interfaces found"))
+        }
+        var lastWasCompact = false
+        for iface in snapshot.interfaces {
+            let compact = iface.dot == .gray
+            if !compact || !lastWasCompact { if menu.items.count > 0 { menu.addItem(.separator()) } }
+            addInterface(iface)
+            lastWasCompact = compact
+        }
+        menu.addItem(.separator())
+
+        // Totals + public IP.
+        let totals = NSMenuItem(title: "", action: #selector(copyValue(_:)), keyEquivalent: "")
+        totals.target = self
+        totals.attributedTitle = totalsTitle()
+        totals.representedObject = "↓ \(Format.bytes(monitor.sinceLaunchIn)) ↑ \(Format.bytes(monitor.sinceLaunchOut))"
+        totals.toolTip = "Bytes moved over the physical interfaces since NielsNetBar started. Click to copy."
+        menu.addItem(totals)
+        totalsRow = totals
+        let v4 = row(label: "Public IPv4", value: "…", copy: nil)
+        let v6 = row(label: "Public IPv6", value: "…", copy: nil)
+        v4.toolTip = "Looked up via api.ipify.org when the menu opens; cached for a minute."
+        v6.toolTip = v4.toolTip
+        menu.addItem(v4); menu.addItem(v6)
+        publicV4Row = v4; publicV6Row = v6
+        updatePublicIPRows()
+        menu.addItem(.separator())
+
+        // Settings.
+        let rate = NSMenuItem(title: "Update Rate", action: nil, keyEquivalent: "")
+        let sub = NSMenu()
+        let currentHz = 1 / monitor.interval
+        for hz in StatusBarController.hzOptions {
+            let it = NSMenuItem(title: hz == 1 ? "1 Hz (every second)" : "\(Int(hz)) Hz", action: #selector(setRate(_:)), keyEquivalent: "")
+            it.target = self
+            it.representedObject = hz
+            it.state = abs(hz - currentHz) < 0.01 ? .on : .off
+            sub.addItem(it)
+        }
+        rate.submenu = sub
+        menu.addItem(rate)
+
+        let login = NSMenuItem(title: "Launch at Login", action: #selector(toggleLogin(_:)), keyEquivalent: "")
+        login.target = self
+        login.state = LoginItem.isEnabled ? .on : .off
+        if LoginItem.status == .requiresApproval {
+            login.title = "Launch at Login (approve in System Settings)"
+        }
+        if !Bundle.main.bundlePath.hasPrefix("/Applications/") {
+            login.toolTip = "This copy runs from \(Bundle.main.bundlePath). Registering it as a Login Item points the Login Item at this path — use ./build.sh install for the real thing."
+        }
+        menu.addItem(login)
+
+        let settings = NSMenuItem(title: "Open Network Settings…", action: #selector(openNetworkSettings), keyEquivalent: "")
+        settings.target = self
+        menu.addItem(settings)
+        menu.addItem(.separator())
+
+        let quit = NSMenuItem(title: "Quit NielsNetBar", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
+        menu.addItem(quit)
+    }
+
+    // MARK: Interface rows
+
+    private func addInterface(_ iface: InterfaceInfo) {
+        // Header: ● Name  en0  ·  primary
+        let header = NSMenuItem(title: "", action: #selector(copyValue(_:)), keyEquivalent: "")
+        header.target = self
+        header.image = StatusBarController.dotImage(iface.dot)
+        let title = NSMutableAttributedString()
+        title.append(NSAttributedString(string: iface.displayName, attributes: [
+            .font: NSFont.menuFont(ofSize: 0).withWeight(.semibold)]))
+        title.append(NSAttributedString(string: "  \(iface.bsdName)", attributes: [
+            .font: NSFont.menuFont(ofSize: 0), .foregroundColor: NSColor.secondaryLabelColor]))
+        if iface.isPrimary {
+            title.append(NSAttributedString(string: "  ·  primary", attributes: [
+                .font: NSFont.menuFont(ofSize: 0).withWeight(.medium), .foregroundColor: NSColor.controlAccentColor]))
+        }
+        if iface.dot == .gray {
+            // Disconnected interfaces get one line only.
+            let why: String
+            if iface.kind == .wifi, let w = iface.wifi, !w.powerOn { why = "Wi-Fi off" }
+            else if iface.kind == .wifi { why = "not associated" }
+            else if !iface.isUp { why = "down" }
+            else { why = "no link" }
+            title.append(NSAttributedString(string: "  —  \(why)", attributes: [
+                .font: NSFont.menuFont(ofSize: 0), .foregroundColor: NSColor.tertiaryLabelColor]))
+            header.attributedTitle = title
+            header.representedObject = iface.mac ?? iface.bsdName
+            header.toolTip = iface.mac.map { "MAC \($0) — click to copy" }
+            menu.addItem(header)
+            return
+        }
+        header.attributedTitle = title
+        header.representedObject = iface.ipv4.first ?? iface.ipv6.first ?? iface.bsdName
+        header.toolTip = "Click to copy the IP address"
+        menu.addItem(header)
+
+        // Live rate.
+        let rate = NSMenuItem(title: "", action: #selector(copyValue(_:)), keyEquivalent: "")
+        rate.target = self
+        rate.indentationLevel = 1
+        rate.attributedTitle = rateTitle(iface.bsdName)
+        rate.representedObject = rateTitle(iface.bsdName).string
+        menu.addItem(rate)
+        rateRows[iface.bsdName] = rate
+
+        // Addresses.
+        for ip in iface.ipv4 { menu.addItem(row(label: "IPv4", value: ip, copy: ip)) }
+        for ip in iface.selfAssigned {
+            let r = row(label: "IPv4", value: "\(ip)  (self-assigned — no DHCP)", copy: ip, valueColor: .systemYellow)
+            menu.addItem(r)
+        }
+        if iface.ipv4.isEmpty && iface.selfAssigned.isEmpty && iface.ipv6.isEmpty {
+            menu.addItem(row(label: "IPv4", value: "no address", copy: nil, valueColor: .systemYellow))
+        }
+        for ip in iface.ipv6 { menu.addItem(row(label: "IPv6", value: ip, copy: ip)) }
+
+        // Wi-Fi.
+        if iface.kind == .wifi, let w = iface.wifi {
+            if let ssid = w.ssid {
+                var v = ssid
+                if let s = w.security { v += "  ·  \(s)" }
+                menu.addItem(row(label: "SSID", value: v, copy: ssid))
+            } else if LocationAccess.shared.isAuthorized {
+                menu.addItem(row(label: "SSID", value: "unavailable", copy: nil))
+            } else {
+                let r = row(label: "SSID", value: LocationAccess.shared.isDenied
+                            ? "hidden — Location access denied; click to open Privacy settings"
+                            : "hidden — click to allow Location access (macOS gates the network name on it)",
+                            copy: nil, valueColor: .systemYellow)
+                r.action = #selector(requestLocation)
+                r.target = self
+                menu.addItem(r)
+            }
+            if let bssid = w.bssid { menu.addItem(row(label: "BSSID", value: bssid, copy: bssid)) }
+            menu.addItem(row(label: "Signal",
+                             value: "\(w.rssi) dBm  ·  noise \(w.noise) dBm  ·  SNR \(w.rssi - w.noise) dB",
+                             copy: "\(w.rssi) dBm"))
+            var link: [String] = []
+            if w.txRate > 0 { link.append(Format.linkSpeed(bitsPerSecond: UInt64(w.txRate * 1_000_000))) }
+            if let c = w.channel { link.append("ch \(c)") }
+            if let b = w.band { link.append(b) }
+            if let wd = w.width { link.append(wd) }
+            if let p = w.phyMode { link.append(p) }
+            menu.addItem(row(label: "Link", value: link.joined(separator: "  ·  "), copy: link.first))
+        } else if let speed = iface.linkSpeed {
+            let s = Format.linkSpeed(bitsPerSecond: speed)
+            menu.addItem(row(label: "Link", value: s, copy: s))
+        }
+
+        if let mac = iface.mac { menu.addItem(row(label: "MAC", value: mac, copy: mac)) }
+
+        // Routing, on the primary only.
+        if iface.isPrimary {
+            var gw: [String] = []
+            if let g = iface.gateway { gw.append(g) }
+            if let g6 = iface.gateway6 { gw.append(g6) }
+            if !gw.isEmpty { menu.addItem(row(label: "Gateway", value: gw.joined(separator: "  ·  "), copy: gw.first)) }
+            if !iface.dns.isEmpty {
+                menu.addItem(row(label: "DNS", value: iface.dns.joined(separator: ", "), copy: iface.dns.joined(separator: " ")))
+            }
+        }
+    }
+
+    // MARK: Titles
+
+    private static let monoFont = NSFont.monospacedDigitSystemFont(ofSize: NSFont.systemFontSize, weight: .regular)
+
+    private func rateTitle(_ bsd: String) -> NSAttributedString {
+        let r = monitor.rates[bsd] ?? NetworkMonitor.Rate()
+        let s = NSMutableAttributedString()
+        s.append(NSAttributedString(string: "↓ ", attributes: [.font: StatusBarController.monoFont, .foregroundColor: StatusBarController.downColor]))
+        s.append(NSAttributedString(string: Format.rateCompact(bitsPerSecond: r.down), attributes: [.font: StatusBarController.monoFont]))
+        s.append(NSAttributedString(string: "    ↑ ", attributes: [.font: StatusBarController.monoFont, .foregroundColor: StatusBarController.upColor]))
+        s.append(NSAttributedString(string: Format.rateCompact(bitsPerSecond: r.up), attributes: [.font: StatusBarController.monoFont]))
+        return s
+    }
+
+    private func totalsTitle() -> NSAttributedString {
+        let s = NSMutableAttributedString()
+        s.append(NSAttributedString(string: "Since launch  ", attributes: [
+            .font: NSFont.menuFont(ofSize: 0), .foregroundColor: NSColor.secondaryLabelColor]))
+        s.append(NSAttributedString(string: "↓ ", attributes: [.font: StatusBarController.monoFont, .foregroundColor: StatusBarController.downColor]))
+        s.append(NSAttributedString(string: Format.bytes(monitor.sinceLaunchIn), attributes: [.font: StatusBarController.monoFont]))
+        s.append(NSAttributedString(string: "    ↑ ", attributes: [.font: StatusBarController.monoFont, .foregroundColor: StatusBarController.upColor]))
+        s.append(NSAttributedString(string: Format.bytes(monitor.sinceLaunchOut), attributes: [.font: StatusBarController.monoFont]))
+        return s
+    }
+
+    /// "Label  value" row; click copies `copy` (or does nothing if nil).
+    private func row(label: String, value: String, copy: String?, valueColor: NSColor = .labelColor) -> NSMenuItem {
+        let it = NSMenuItem(title: "\(label) \(value)", action: copy == nil ? nil : #selector(copyValue(_:)), keyEquivalent: "")
+        it.target = self
+        it.indentationLevel = 1
+        it.representedObject = copy
+        let s = NSMutableAttributedString()
+        s.append(NSAttributedString(string: label + "  ", attributes: [
+            .font: NSFont.menuFont(ofSize: 0), .foregroundColor: NSColor.secondaryLabelColor]))
+        s.append(NSAttributedString(string: value, attributes: [
+            .font: StatusBarController.monoFont, .foregroundColor: valueColor]))
+        it.attributedTitle = s
+        if copy != nil { it.toolTip = "Click to copy" }
+        return it
+    }
+
+    private func disabled(_ title: String) -> NSMenuItem {
+        let it = NSMenuItem(title: title, action: nil, keyEquivalent: "")
+        it.isEnabled = false
+        return it
+    }
+
+    private func updatePublicIPRows() {
+        func text(_ s: PublicIP.State) -> (String, String?) {
+            switch s {
+            case .idle, .fetching: return ("…", nil)
+            case .value(let v): return (v, v)
+            case .failed: return ("unavailable", nil)
+            }
+        }
+        if let r = publicV4Row {
+            let (v, c) = text(PublicIP.shared.ipv4)
+            r.attributedTitle = row(label: "Public IPv4", value: v, copy: c).attributedTitle
+            r.representedObject = c
+            r.action = c == nil ? nil : #selector(copyValue(_:))
+        }
+        if let r = publicV6Row {
+            let (v, c) = text(PublicIP.shared.ipv6)
+            r.attributedTitle = row(label: "Public IPv6", value: v == "unavailable" ? "none" : v, copy: c).attributedTitle
+            r.representedObject = c
+            r.action = c == nil ? nil : #selector(copyValue(_:))
+        }
+    }
+
+    private static func dotImage(_ dot: Dot) -> NSImage {
+        let color: NSColor
+        switch dot {
+        case .green: color = .systemGreen
+        case .yellow: color = .systemYellow
+        case .gray: color = .tertiaryLabelColor
+        }
+        let img = NSImage(size: NSSize(width: 12, height: 12), flipped: false) { rect in
+            color.setFill()
+            NSBezierPath(ovalIn: rect.insetBy(dx: 1.5, dy: 1.5)).fill()
+            return true
+        }
+        return img
+    }
+
+    // MARK: Actions
+
+    @objc private func copyValue(_ sender: NSMenuItem) {
+        guard let s = sender.representedObject as? String else { return }
+        let pb = NSPasteboard.general
+        pb.clearContents()
+        pb.setString(s, forType: .string)
+    }
+
+    @objc private func setRate(_ sender: NSMenuItem) {
+        guard let hz = sender.representedObject as? Double, hz > 0 else { return }
+        monitor.interval = 1 / hz
+        UserDefaults.standard.set(hz, forKey: StatusBarController.hzDefaultsKey)
+    }
+
+    @objc private func toggleLogin(_ sender: NSMenuItem) {
+        let turnOn = !LoginItem.isEnabled
+        do {
+            try LoginItem.setEnabled(turnOn)
+        } catch {
+            NSLog("Login item: \(error)")
+            let alert = NSAlert()
+            alert.messageText = turnOn ? "Could not enable Launch at Login" : "Could not disable Launch at Login"
+            alert.informativeText = error.localizedDescription
+            alert.runModal()
+        }
+    }
+
+    @objc private func openNetworkSettings() {
+        NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:com.apple.Network-Settings.extension")!)
+    }
+
+    @objc private func requestLocation() {
+        if LocationAccess.shared.isDenied {
+            NSWorkspace.shared.open(LocationAccess.settingsURL)
+        } else {
+            LocationAccess.shared.requestIfNeeded()
+        }
+    }
+}
+
+private extension NSFont {
+    func withWeight(_ weight: NSFont.Weight) -> NSFont {
+        NSFont.systemFont(ofSize: pointSize, weight: weight)
+    }
+}
