@@ -41,8 +41,14 @@ that carries them). Bits per second, SI prefixes, fixed width so it never jiggle
 Sampled at 2 Hz by default; **Update Rate** in the menu offers 1 / 2 / 5 Hz and remembers
 the choice (`--hz N` overrides it for one run).
 
-**In the dropdown** — one block per interface, primary first, then connected → idle →
-down, in the order of System Settings › Network:
+**In the dropdown** — first the total with a **chart of the last 60 seconds**: one bar per
+second, green ↓ growing up from the baseline and blue ↑ growing down, on one linear scale set
+by the window's peak (labelled). It records from launch, so it is full the first time you
+open the menu, and keeps moving while the menu is open; hover a bar for that second's
+numbers.
+
+Then one block per interface, primary first, then connected → idle → down, in the order of
+System Settings › Network:
 
 | Dot | Meaning |
 |---|---|
@@ -77,6 +83,9 @@ Loopback, AirDrop's `awdl`/`llw`, bridges and the like are never shown.
   ordering from `SCNetworkSetGetServiceOrder`.
 * `WiFiInfo.swift` — CoreWLAN for RSSI, noise, channel, PHY rate, security. Plus the Location
   authorization that the SSID needs (below).
+* `ChartView.swift` — the history chart, a custom `NSView` in an `NSMenuItem`. The monitor
+  folds every sample into 1 s buckets (`NetworkMonitor.history`, a 60-entry ring buffer) so
+  the chart looks the same at 1, 2 or 5 Hz; seconds lost to sleep are padded with zeros.
 * `StatusBarController.swift` — the `NSStatusItem` and `NSMenu`. The bar text is drawn
   into an image rather than set as a title: that is what gets two lines centred in the bar.
   Blue ↑, green ↓, and grey digits — a mid-grey picked per appearance when the image is
@@ -89,7 +98,8 @@ Loopback, AirDrop's `awdl`/`llw`, bridges and the like are never shown.
   install` launches the installed copy with `--enable-login-item`, and `uninstall` runs it
   with `--disable-login-item` before deleting it.
 * `main.swift` — flag parsing, the `NSApplicationDelegate`, and a few debug flags:
-  `--print` (the menu's data as text), `--dump-bar PATH` (the bar image), `--screenshot PATH`.
+  `--print` (the menu's data as text), `--dump-bar PATH` (the bar image), `--dump-chart PATH`
+  (the chart with fake data), `--screenshot PATH`.
 
 ## Gotchas
 

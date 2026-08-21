@@ -30,6 +30,15 @@ final class NetworkMonitor {
     /// Called on the main thread after every sample.
     var onTick: (() -> Void)?
 
+    /// The last `historyLength` seconds of `total`, oldest first, one entry per wall-clock
+    /// second (samples at 2/5 Hz are averaged into their second). Recorded from launch, so
+    /// the chart is full the first time the menu opens.
+    private(set) var history: [Rate] = []
+    static let historyLength = 60
+    private var bucketSecond: Int
+    private var bucketBits = Rate()          // accumulated bits in the current second
+    private var bucketTime: TimeInterval = 0 // and the time those bits cover
+
     var interval: TimeInterval {
         didSet { if timer != nil { start() } }
     }
@@ -42,6 +51,7 @@ final class NetworkMonitor {
         self.interval = interval
         last = NetworkMonitor.readCounters()
         lastTime = Date()
+        bucketSecond = Int(lastTime.timeIntervalSince1970)
     }
 
     func start() {
@@ -86,7 +96,30 @@ final class NetworkMonitor {
         total = sum
         last = current
         lastTime = now
+        record(sum, dt: dt, at: now)
         onTick?()
+    }
+
+    /// Fold a sample into the per-second history.
+    private func record(_ r: Rate, dt: TimeInterval, at now: Date) {
+        let second = Int(now.timeIntervalSince1970)
+        if second != bucketSecond {
+            // Close the bucket we were filling…
+            if bucketTime > 0 {
+                history.append(Rate(down: bucketBits.down / bucketTime, up: bucketBits.up / bucketTime))
+            }
+            // …and pad any seconds with no sample at all (a slow tick rate can't cause that,
+            // but sleep/wake can) with silence, so the time axis stays honest.
+            let gap = second - bucketSecond - 1
+            if gap > 0 { history.append(contentsOf: repeatElement(Rate(), count: min(gap, NetworkMonitor.historyLength))) }
+            if history.count > NetworkMonitor.historyLength { history.removeFirst(history.count - NetworkMonitor.historyLength) }
+            bucketSecond = second
+            bucketBits = Rate()
+            bucketTime = 0
+        }
+        bucketBits.down += r.down * dt
+        bucketBits.up += r.up * dt
+        bucketTime += dt
     }
 
     /// Which interfaces make up the number in the menu bar: the physical ports (`en*`,

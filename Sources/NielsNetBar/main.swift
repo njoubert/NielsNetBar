@@ -11,6 +11,7 @@ import AppKit
 //   --render-iconset DIR    write an .iconset (for iconutil) and exit
 //   --screenshot PATH       open the menu, capture it to PATH, quit (for the README)
 //   --dump-bar PATH         render just the status item to PATH, quit (layout check)
+//   --dump-chart PATH       render the history chart with fake data to PATH, quit
 //   --print                 print what the menu would show, as text, and quit
 
 struct Options {
@@ -57,6 +58,24 @@ while !args.isEmpty {
     case "--render-iconset": renderIconsetDir = takeValue(a)
     case "--screenshot": options.screenshotPath = takeValue(a)
     case "--dump-bar": options.dumpBarPath = takeValue(a)
+    case "--dump-chart":
+        // Render the history chart with synthetic data (layout check, no screen grab needed).
+        let path = takeValue(a)
+        MainActor.assumeIsolated {
+            NSApplication.shared.appearance = NSAppearance(named: .darkAqua)
+            let v = ChartView(frame: NSRect(x: 0, y: 0, width: 448, height: ChartView.chartHeight))
+            let fake: [NetworkMonitor.Rate] = (0..<52).map { i in
+                NetworkMonitor.Rate(down: Double(i % 9) * 1_400_000 + (i % 4 == 0 ? 6_000_000 : 0), up: Double(i % 5) * 400_000)
+            }
+            v.history = { fake }
+            v.simulateHover(at: 40)
+            v.debugBackground = true
+            guard let rep = v.bitmapImageRepForCachingDisplay(in: v.bounds) else { exit(1) }
+            v.cacheDisplay(in: v.bounds, to: rep)
+            try? rep.representation(using: .png, properties: [:])?.write(to: URL(fileURLWithPath: path))
+            print("wrote \(path)")
+        }
+        exit(0)
     case "--print":
         // Text dump of what the menu would show, plus a one-second rate sample.
         let before = NetworkMonitor.readCounters()

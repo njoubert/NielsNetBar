@@ -14,6 +14,8 @@ final class StatusBarController: NSObject, NSMenuDelegate {
     private var menuOpen = false
 
     // Rows that update live while the menu is open.
+    private var totalRow: NSMenuItem?
+    private let chart = ChartView(frame: NSRect(x: 0, y: 0, width: 448, height: ChartView.chartHeight))
     private var rateRows: [String: NSMenuItem] = [:]
     private var totalsRow: NSMenuItem?
     private var publicV4Row: NSMenuItem?
@@ -27,6 +29,7 @@ final class StatusBarController: NSObject, NSMenuDelegate {
         menu.autoenablesItems = false
         item.menu = menu
         item.button?.toolTip = "NielsNetBar — network throughput"
+        chart.history = { [weak self] in self?.monitor.history ?? [] }
         monitor.onTick = { [weak self] in self?.tick() }
         PublicIP.shared.onChange = { [weak self] in self?.updatePublicIPRows() }
         LocationAccess.shared.onChange = { [weak self] in
@@ -100,6 +103,8 @@ final class StatusBarController: NSObject, NSMenuDelegate {
     private func tick() {
         updateBar()
         guard menuOpen else { return }
+        totalRow?.attributedTitle = totalTitle()
+        chart.needsDisplay = true
         for (bsd, row) in rateRows {
             row.attributedTitle = rateTitle(bsd)
         }
@@ -123,12 +128,25 @@ final class StatusBarController: NSObject, NSMenuDelegate {
     private func rebuild() {
         menu.removeAllItems()
         rateRows = [:]
+        totalRow = nil
         totalsRow = nil
         publicV4Row = nil
         publicV6Row = nil
 
         snapshot = Interfaces.snapshot()
         PublicIP.shared.refreshIfStale()
+
+        // Total + the last minute as a chart.
+        let total = NSMenuItem(title: "", action: #selector(copyValue(_:)), keyEquivalent: "")
+        total.target = self
+        total.attributedTitle = totalTitle()
+        total.representedObject = totalTitle().string
+        total.toolTip = "Sum over the physical interfaces — the number in the menu bar. Click to copy."
+        menu.addItem(total)
+        totalRow = total
+        let chartItem = NSMenuItem()
+        chartItem.view = chart
+        menu.addItem(chartItem)
 
         if snapshot.interfaces.isEmpty {
             menu.addItem(disabled("No network interfaces found"))
@@ -303,6 +321,18 @@ final class StatusBarController: NSObject, NSMenuDelegate {
     private func rateTitle(_ bsd: String) -> NSAttributedString {
         let r = monitor.rates[bsd] ?? NetworkMonitor.Rate()
         let s = NSMutableAttributedString()
+        s.append(NSAttributedString(string: "↓ ", attributes: [.font: StatusBarController.monoFont, .foregroundColor: StatusBarController.downColor]))
+        s.append(NSAttributedString(string: Format.rateCompact(bitsPerSecond: r.down), attributes: [.font: StatusBarController.monoFont]))
+        s.append(NSAttributedString(string: "    ↑ ", attributes: [.font: StatusBarController.monoFont, .foregroundColor: StatusBarController.upColor]))
+        s.append(NSAttributedString(string: Format.rateCompact(bitsPerSecond: r.up), attributes: [.font: StatusBarController.monoFont]))
+        return s
+    }
+
+    private func totalTitle() -> NSAttributedString {
+        let r = monitor.total
+        let s = NSMutableAttributedString()
+        s.append(NSAttributedString(string: "Total  ", attributes: [
+            .font: NSFont.menuFont(ofSize: 0).withWeight(.semibold)]))
         s.append(NSAttributedString(string: "↓ ", attributes: [.font: StatusBarController.monoFont, .foregroundColor: StatusBarController.downColor]))
         s.append(NSAttributedString(string: Format.rateCompact(bitsPerSecond: r.down), attributes: [.font: StatusBarController.monoFont]))
         s.append(NSAttributedString(string: "    ↑ ", attributes: [.font: StatusBarController.monoFont, .foregroundColor: StatusBarController.upColor]))
