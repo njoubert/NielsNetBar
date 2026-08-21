@@ -7,7 +7,7 @@ final class ChartView: NSView {
 
     static let chartHeight: CGFloat = 96
     private static let insetX: CGFloat = 14     // lines up with the menu rows' text
-    private static let insetY: CGFloat = 4
+    private static let insetY: CGFloat = 5
     private static let gap: CGFloat = 1
     private static let labelFont = NSFont.monospacedDigitSystemFont(ofSize: 9, weight: .medium)
 
@@ -28,9 +28,23 @@ final class ChartView: NSView {
     // MARK: Layout
 
     private static let labelStrip: CGFloat = 13  // labels live above the bars, not on them
+    private static let boxPadding = NSSize(width: 10, height: 7)
+    private static let boxRadius: CGFloat = 8
+
+    /// The panel the chart sits in: darker than the menu, like a window inside it.
+    private static let boxFill = NSColor(name: nil) { a in
+        a.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua ? NSColor(white: 0, alpha: 0.32) : NSColor(white: 0, alpha: 0.05)
+    }
+    private static let boxStroke = NSColor(name: nil) { a in
+        a.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua ? NSColor(white: 1, alpha: 0.09) : NSColor(white: 0, alpha: 0.10)
+    }
+
+    private var boxRect: NSRect {
+        bounds.insetBy(dx: ChartView.insetX, dy: ChartView.insetY)
+    }
 
     private var plotRect: NSRect {
-        var r = bounds.insetBy(dx: ChartView.insetX, dy: ChartView.insetY)
+        var r = boxRect.insetBy(dx: ChartView.boxPadding.width, dy: ChartView.boxPadding.height)
         r.size.height -= ChartView.labelStrip
         return r
     }
@@ -56,6 +70,12 @@ final class ChartView: NSView {
 
     override func draw(_ dirtyRect: NSRect) {
         if debugBackground { NSColor(white: 0.13, alpha: 1).setFill(); bounds.fill() }
+
+        // The panel.
+        let box = NSBezierPath(roundedRect: boxRect.insetBy(dx: 0.5, dy: 0.5), xRadius: ChartView.boxRadius, yRadius: ChartView.boxRadius)
+        ChartView.boxFill.setFill(); box.fill()
+        ChartView.boxStroke.setStroke(); box.lineWidth = 1; box.stroke()
+
         let plot = plotRect
         let samples = history()
         let n = NetworkMonitor.historyLength
