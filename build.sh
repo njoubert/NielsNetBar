@@ -100,7 +100,7 @@ make_dmg() {
   rm "$staging/.background/background.png" "$staging/.background/background@2x.png"
 
   # A stale mount from an earlier run would make this one land on "/Volumes/$NAME 1".
-  [ -d "$vol" ] && hdiutil detach "$vol" -quiet -force || true
+  if [ -d "$vol" ]; then hdiutil detach "$vol" -quiet -force || true; fi
   hdiutil create -volname "$NAME" -srcfolder "$staging" -ov -format UDRW -fs HFS+ -quiet "$rw"
   local dev
   dev=$(hdiutil attach -readwrite -noverify -noautoopen "$rw" | awk '/^\/dev\// {print $1; exit}')
@@ -186,7 +186,7 @@ case "$cmd" in
 
   stop)
     stop_all
-    [ -e "$INSTALLED" ] && note "the installed copy can be restarted with: open -a $NAME" || true
+    if [ -e "$INSTALLED" ]; then note "the installed copy can be restarted with: open -a $NAME"; fi
     ;;
 
   app)
@@ -232,7 +232,7 @@ case "$cmd" in
       stop_all
       note "$INSTALLED is not installed"
     fi
-    defaults delete "$BUNDLE_ID" >/dev/null 2>&1 && note "removed preferences" || true
+    if defaults delete "$BUNDLE_ID" >/dev/null 2>&1; then note "removed preferences"; fi
     ;;
 
   status)

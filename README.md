@@ -145,8 +145,6 @@ no Xcode project). Apple Silicon or Intel.
 
 ## License
 
-NielsNetBar — everything in this directory (`shared/niels-net-bar/`) — is free software
-under the [GNU General Public License, version 3 or later](LICENSE). Use it, change it,
-ship it, sell it — but anything built from it has to be released under the same terms,
-with source. That covers only this utility: the rest of the repository it lives in (my
-dotfiles) is not licensed for reuse.
+NielsNetBar is free software under the [GNU General Public License, version 3 or
+later](LICENSE). Use it, change it, ship it, sell it — but anything built from it has to
+be released under the same terms, with source.
