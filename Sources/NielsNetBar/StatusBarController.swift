@@ -17,9 +17,19 @@ final class StatusBarController: NSObject, NSMenuDelegate {
     private var totalRow: NSMenuItem?
     private let chart = ChartView(frame: NSRect(x: 0, y: 0, width: 384, height: ChartView.chartHeight))
     private var rateRows: [String: NSMenuItem] = [:]
+    private var ssidRows: [String: NSMenuItem] = [:]   // Wi-Fi bsd name → its SSID row
     private var totalsRow: NSMenuItem?
     private var publicV4Row: NSMenuItem?
     private var publicV6Row: NSMenuItem?
+
+    /// The two lines last drawn into the bar; a tick that would draw the same text skips
+    /// the image rebuild and the status-item redraw that comes with it.
+    private var lastBarText: [String] = []
+    /// Why nobody can see the menu bar right now: displays asleep, screen locked, or
+    /// another user's session in front. While any apply, sampling continues (the chart
+    /// and the totals stay honest) but the bar is not repainted.
+    private var hiddenReasons: Set<String> = []
+    private var observers: [(center: NotificationCenter, token: NSObjectProtocol)] = []
 
     init(monitor: NetworkMonitor) {
         self.monitor = monitor
@@ -32,11 +42,43 @@ final class StatusBarController: NSObject, NSMenuDelegate {
         chart.history = { [weak self] in self?.monitor.history ?? [] }
         monitor.onTick = { [weak self] in self?.tick() }
         PublicIP.shared.onChange = { [weak self] in self?.updatePublicIPRows() }
-        LocationAccess.shared.onChange = { [weak self] in
-            guard let self, self.menuOpen else { return }
-            self.rebuild()
-        }
+        // Granting Location access mid-menu reveals the SSID: update that row in place
+        // rather than rebuilding a menu that is being tracked (flicker, lost hover).
+        LocationAccess.shared.onChange = { [weak self] in self?.updateSSIDRows() }
+        observeVisibility()
         updateBar()
+    }
+
+    deinit {
+        for (center, token) in observers { center.removeObserver(token) }
+    }
+
+    // MARK: Visibility
+
+    /// Pause bar repaints while the menu bar is not on screen. A long-running app spends
+    /// most of its life behind a locked screen or a sleeping display; painting two lines of
+    /// text into the status bar twice a second there is the single biggest waste.
+    private func observeVisibility() {
+        let ws = NSWorkspace.shared.notificationCenter
+        let dnc = DistributedNotificationCenter.default()
+        func watch(_ center: NotificationCenter, _ name: Notification.Name, hidden: Bool, reason: String) {
+            let o = center.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in
+                MainActor.assumeIsolated { self?.setHidden(hidden, reason: reason) }
+            }
+            observers.append((center, o))
+        }
+        watch(ws, NSWorkspace.screensDidSleepNotification, hidden: true, reason: "displays")
+        watch(ws, NSWorkspace.screensDidWakeNotification, hidden: false, reason: "displays")
+        watch(ws, NSWorkspace.sessionDidResignActiveNotification, hidden: true, reason: "session")
+        watch(ws, NSWorkspace.sessionDidBecomeActiveNotification, hidden: false, reason: "session")
+        watch(dnc, Notification.Name("com.apple.screenIsLocked"), hidden: true, reason: "lock")
+        watch(dnc, Notification.Name("com.apple.screenIsUnlocked"), hidden: false, reason: "lock")
+    }
+
+    private func setHidden(_ hidden: Bool, reason: String) {
+        let wasHidden = !hiddenReasons.isEmpty
+        if hidden { hiddenReasons.insert(reason) } else { hiddenReasons.remove(reason) }
+        if wasHidden, hiddenReasons.isEmpty { updateBar() }   // catch up right away
     }
 
     /// The frame of the status item on screen (for `--screenshot`).
@@ -77,6 +119,11 @@ final class StatusBarController: NSObject, NSMenuDelegate {
     /// Green ↓ / blue ↑; the digits are grey, resolved at draw time against the bar's
     /// light/dark appearance (`barTextColor`).
     private func updateBar() {
+        let values = [Format.rateFixed(bitsPerSecond: monitor.total.up),
+                      Format.rateFixed(bitsPerSecond: monitor.total.down)]
+        guard values != lastBarText else { return }
+        lastBarText = values
+
         let font = StatusBarController.barFont
         let text = StatusBarController.barTextColor
         func line(_ arrow: String, _ color: NSColor, _ value: String) -> NSAttributedString {
@@ -85,8 +132,8 @@ final class StatusBarController: NSObject, NSMenuDelegate {
             return s
         }
         let lines = [
-            line("↑", StatusBarController.upColor, Format.rateFixed(bitsPerSecond: monitor.total.up)),
-            line("↓", StatusBarController.downColor, Format.rateFixed(bitsPerSecond: monitor.total.down)),
+            line("↑", StatusBarController.upColor, values[0]),
+            line("↓", StatusBarController.downColor, values[1]),
         ]
         let lh = StatusBarController.barLineHeight
         let width = ceil(lines.map { $0.size().width }.max() ?? 0) + 2
@@ -101,7 +148,7 @@ final class StatusBarController: NSObject, NSMenuDelegate {
     }
 
     private func tick() {
-        updateBar()
+        if hiddenReasons.isEmpty { updateBar() }
         guard menuOpen else { return }
         totalRow?.attributedTitle = totalTitle()
         chart.needsDisplay = true
@@ -123,11 +170,13 @@ final class StatusBarController: NSObject, NSMenuDelegate {
 
     func menuDidClose(_ menu: NSMenu) {
         menuOpen = false
+        chart.clearHover()
     }
 
     private func rebuild() {
         menu.removeAllItems()
         rateRows = [:]
+        ssidRows = [:]
         totalRow = nil
         totalsRow = nil
         publicV4Row = nil
@@ -157,10 +206,7 @@ final class StatusBarController: NSObject, NSMenuDelegate {
         totals.toolTip = "Bytes moved over the physical interfaces since NielsNetBar started. Click to copy."
         menu.addItem(totals)
         totalsRow = totals
-        let v4 = row(label: "Public IPv4", value: "…", copy: nil)
-        let v6 = row(label: "Public IPv6", value: "…", copy: nil)
-        v4.toolTip = "Looked up via api.ipify.org when the menu opens; cached for a minute."
-        v6.toolTip = v4.toolTip
+        let v4 = NSMenuItem(), v6 = NSMenuItem()
         menu.addItem(v4); menu.addItem(v6)
         publicV4Row = v4; publicV6Row = v6
         updatePublicIPRows()
@@ -269,21 +315,10 @@ final class StatusBarController: NSObject, NSMenuDelegate {
 
         // Wi-Fi.
         if iface.kind == .wifi, let w = iface.wifi {
-            if let ssid = w.ssid {
-                var v = ssid
-                if let s = w.security { v += " · \(s)" }
-                menu.addItem(row(label: "SSID", value: v, copy: ssid))
-            } else if LocationAccess.shared.isAuthorized {
-                menu.addItem(row(label: "SSID", value: "unavailable", copy: nil))
-            } else {
-                let r = row(label: "SSID", value: LocationAccess.shared.isDenied
-                            ? "hidden — Location access denied; click to open Privacy settings"
-                            : "hidden — click to allow Location access (macOS gates the network name on it)",
-                            copy: nil, valueColor: .systemYellow)
-                r.action = #selector(requestLocation)
-                r.target = self
-                menu.addItem(r)
-            }
+            let ssid = NSMenuItem()
+            configureSSIDRow(ssid, wifi: w)
+            menu.addItem(ssid)
+            ssidRows[iface.bsdName] = ssid
             if let bssid = w.bssid { menu.addItem(row(label: "BSSID", value: bssid, copy: bssid)) }
             menu.addItem(row(label: "Signal",
                              value: "\(w.rssi) dBm · noise \(w.noise) dBm · SNR \(w.rssi - w.noise) dB",
@@ -355,7 +390,16 @@ final class StatusBarController: NSObject, NSMenuDelegate {
 
     /// "Label  value" row; click copies `copy` (or does nothing if nil).
     private func row(label: String, value: String, copy: String?, valueColor: NSColor = .labelColor) -> NSMenuItem {
-        let it = NSMenuItem(title: "\(label) \(value)", action: copy == nil ? nil : #selector(copyValue(_:)), keyEquivalent: "")
+        let it = NSMenuItem()
+        setRow(it, label: label, value: value, copy: copy, valueColor: valueColor)
+        return it
+    }
+
+    /// (Re)fill an existing row — used for the ones that change while the menu is open.
+    private func setRow(_ it: NSMenuItem, label: String, value: String, copy: String?, valueColor: NSColor = .labelColor,
+                        toolTip: String? = nil) {
+        it.title = "\(label) \(value)"
+        it.action = copy == nil ? nil : #selector(copyValue(_:))
         it.target = self
         it.indentationLevel = 1
         it.representedObject = copy
@@ -365,8 +409,34 @@ final class StatusBarController: NSObject, NSMenuDelegate {
         s.append(NSAttributedString(string: value, attributes: [
             .font: StatusBarController.monoFont, .foregroundColor: valueColor]))
         it.attributedTitle = s
-        if copy != nil { it.toolTip = "Click to copy" }
-        return it
+        it.toolTip = toolTip ?? (copy == nil ? nil : "Click to copy")
+    }
+
+    /// The SSID row: the name when we may see it, otherwise why not and a click to fix it.
+    private func configureSSIDRow(_ it: NSMenuItem, wifi w: WiFiInfo) {
+        if let ssid = w.ssid {
+            var v = ssid
+            if let s = w.security { v += " · \(s)" }
+            setRow(it, label: "SSID", value: v, copy: ssid)
+        } else if LocationAccess.shared.isAuthorized {
+            setRow(it, label: "SSID", value: "unavailable", copy: nil)
+        } else {
+            setRow(it, label: "SSID", value: LocationAccess.shared.isDenied
+                   ? "hidden — Location access denied; click to open Privacy settings"
+                   : "hidden — click to allow Location access (macOS gates the network name on it)",
+                   copy: nil, valueColor: .systemYellow)
+            it.action = #selector(requestLocation)
+        }
+    }
+
+    /// Location authorization changed: re-read each Wi-Fi interface and refresh its SSID
+    /// row in place. Nothing to do when the menu is closed — the next open rebuilds anyway.
+    private func updateSSIDRows() {
+        guard menuOpen else { return }
+        for (bsd, it) in ssidRows {
+            guard let w = WiFiInfo.read(bsdName: bsd) else { continue }
+            configureSSIDRow(it, wifi: w)
+        }
     }
 
     private func disabled(_ title: String) -> NSMenuItem {
@@ -383,17 +453,14 @@ final class StatusBarController: NSObject, NSMenuDelegate {
             case .failed: return ("unavailable", nil)
             }
         }
+        let tip = "Looked up via api.ipify.org when the menu opens; cached for a minute."
         if let r = publicV4Row {
             let (v, c) = text(PublicIP.shared.ipv4)
-            r.attributedTitle = row(label: "Public IPv4", value: v, copy: c).attributedTitle
-            r.representedObject = c
-            r.action = c == nil ? nil : #selector(copyValue(_:))
+            setRow(r, label: "Public IPv4", value: v, copy: c, toolTip: tip)
         }
         if let r = publicV6Row {
             let (v, c) = text(PublicIP.shared.ipv6)
-            r.attributedTitle = row(label: "Public IPv6", value: v == "unavailable" ? "none" : v, copy: c).attributedTitle
-            r.representedObject = c
-            r.action = c == nil ? nil : #selector(copyValue(_:))
+            setRow(r, label: "Public IPv6", value: v == "unavailable" ? "none" : v, copy: c, toolTip: tip)
         }
     }
 

@@ -18,7 +18,6 @@ final class PublicIP {
     func refreshIfStale() {
         if let t = fetchedAt, Date().timeIntervalSince(t) < 60 { return }
         if case .fetching = ipv4 { return }
-        fetchedAt = Date()
         ipv4 = .fetching
         ipv6 = .fetching
         onChange?()
@@ -28,12 +27,13 @@ final class PublicIP {
             let (r4, r6) = await (a, b)
             ipv4 = r4.map { .value($0) } ?? .failed
             ipv6 = r6.map { .value($0) } ?? .failed
+            // Only a result is worth caching: after a transient failure (offline, captive
+            // portal) the next menu open should try again, not show "unavailable" for a
+            // minute. v6 alone failing is normal on a v4-only network, so either counts.
+            fetchedAt = (r4 != nil || r6 != nil) ? Date() : nil
             onChange?()
         }
     }
-
-    /// Forget the cache (e.g. when the primary interface changes).
-    func invalidate() { fetchedAt = nil }
 
     private static func fetch(_ url: URL) async -> String? {
         var req = URLRequest(url: url)

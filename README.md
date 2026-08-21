@@ -39,7 +39,9 @@ that carries them). Bits per second, SI prefixes, fixed width so it never jiggle
 ```
 
 Sampled at 2 Hz by default; **Update Rate** in the menu offers 1 / 2 / 5 Hz and remembers
-the choice (`--hz N` overrides it for one run).
+the choice (`--hz N` overrides it for one run). The bar is only repainted when the digits
+change, and not at all while the screen is locked or the displays are asleep (sampling
+continues, so the chart and totals stay right); at 2 Hz it idles under 1 % CPU.
 
 **In the dropdown** — first the total with a **chart of the last 60 seconds**: one bar per
 second, blue ↑ growing up from the baseline and green ↓ growing down, on one linear scale set
@@ -74,8 +76,9 @@ Loopback, AirDrop's `awdl`/`llw`, bridges and the like are never shown.
 ## How it works
 
 * `Sources/NielsNetBar/NetworkMonitor.swift` — byte counters from `sysctl(NET_RT_IFLIST2)`,
-  one `if_msghdr2` per interface with 64-bit `ifi_ibytes`/`ifi_obytes`. No subprocess, no
-  parsing, microseconds per tick. Rates are deltas over the measured interval.
+  one `if_msghdr2` per interface with 64-bit `ifi_ibytes`/`ifi_obytes`, the name from the
+  `sockaddr_dl` that follows it in the same buffer. No subprocess, no parsing, ~40 µs per
+  tick. Rates are deltas over a monotonic clock that keeps counting through sleep.
 * `Interfaces.swift` — the dropdown's data. Names and types from `SCNetworkInterfaceCopyAll`,
   addresses and flags from `getifaddrs`, link state and Ethernet speed from
   `ioctl(SIOCGIFMEDIA)` (exactly what `ifconfig` reads for `status:` and `media:`), primary

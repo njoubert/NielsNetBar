@@ -12,7 +12,7 @@ struct InterfaceCounters {
 /// Samples the kernel's interface counters on a timer and turns them into rates.
 ///
 /// Counters come from `sysctl(NET_RT_IFLIST2)`, which hands back one `if_msghdr2` per
-/// interface with 64-bit `ifi_ibytes`/`ifi_obytes` — no subprocess, no parsing, a few
+/// interface with 64-bit `ifi_ibytes`/`ifi_obytes` — no subprocess, no parsing, tens of
 /// microseconds per tick.
 @MainActor
 final class NetworkMonitor {
@@ -30,9 +30,9 @@ final class NetworkMonitor {
     /// Called on the main thread after every sample.
     var onTick: (() -> Void)?
 
-    /// The last `historyLength` seconds of `total`, oldest first, one entry per wall-clock
-    /// second (samples at 2/5 Hz are averaged into their second). Recorded from launch, so
-    /// the chart is full the first time the menu opens.
+    /// The last `historyLength` seconds of `total`, oldest first, one entry per second
+    /// (samples at 2/5 Hz are averaged into their second). Recorded from launch, so the
+    /// chart is full the first time the menu opens.
     private(set) var history: [Rate] = []
     static let historyLength = 60
     private var bucketSecond: Int
@@ -45,20 +45,24 @@ final class NetworkMonitor {
 
     private var timer: Timer?
     private var last: [String: InterfaceCounters] = [:]
-    private var lastTime = Date()
+    private var lastTime: TimeInterval
 
     init(interval: TimeInterval) {
         self.interval = interval
         last = NetworkMonitor.readCounters()
-        lastTime = Date()
-        bucketSecond = Int(lastTime.timeIntervalSince1970)
+        lastTime = NetworkMonitor.now()
+        bucketSecond = Int(lastTime)
     }
 
     func start() {
         timer?.invalidate()
+        // The timer fires on the main run loop, so it is already on the main actor; no
+        // need to bounce through a Task (which would cost a second wake-up per tick).
         let t = Timer(timeInterval: interval, repeats: true) { [weak self] _ in
-            Task { @MainActor in self?.sample() }
+            MainActor.assumeIsolated { self?.sample() }
         }
+        // A little slack lets the kernel coalesce our wake-up with others (energy).
+        t.tolerance = interval / 10
         // .common so the bar keeps updating while the dropdown menu is open (menu
         // tracking runs the run loop in a mode the default timer mode is not part of).
         RunLoop.main.add(t, forMode: .common)
@@ -70,11 +74,20 @@ final class NetworkMonitor {
         timer = nil
     }
 
+    /// Seconds on a monotonic clock that keeps counting through sleep (CLOCK_MONOTONIC
+    /// does on Darwin). Wall-clock time can step backwards (NTP) and would stall sampling.
+    nonisolated static func now() -> TimeInterval {
+        Double(clock_gettime_nsec_np(CLOCK_MONOTONIC)) / 1e9
+    }
+
     private func sample() {
-        let now = Date()
-        let dt = now.timeIntervalSince(lastTime)
+        let now = NetworkMonitor.now()
+        let dt = now - lastTime
         guard dt > 0.05 else { return }
         let current = NetworkMonitor.readCounters()
+        // A failed read (it can't really fail, but if it did) must not wipe the baseline,
+        // or the next tick has nothing to diff against either.
+        guard !current.isEmpty else { return }
 
         var newRates: [String: Rate] = [:]
         var sum = Rate()
@@ -101,8 +114,8 @@ final class NetworkMonitor {
     }
 
     /// Fold a sample into the per-second history.
-    private func record(_ r: Rate, dt: TimeInterval, at now: Date) {
-        let second = Int(now.timeIntervalSince1970)
+    private func record(_ r: Rate, dt: TimeInterval, at now: TimeInterval) {
+        let second = Int(now)
         if second != bucketSecond {
             // Close the bucket we were filling…
             if bucketTime > 0 {
@@ -131,31 +144,50 @@ final class NetworkMonitor {
     }
 
     /// One `sysctl(NET_RT_IFLIST2)` walk → counters keyed by BSD name.
+    ///
+    /// The name is read from the `sockaddr_dl` (RTA_IFP) that follows each `if_msghdr2`
+    /// in the same buffer. Do not be tempted by `if_indextoname`: on Darwin it is
+    /// implemented as a full `getifaddrs()` walk, which made this ~15× slower per interface.
     nonisolated static func readCounters() -> [String: InterfaceCounters] {
         var mib: [Int32] = [CTL_NET, PF_ROUTE, 0, 0, NET_RT_IFLIST2, 0]
         var len = 0
         guard sysctl(&mib, UInt32(mib.count), nil, &len, nil, 0) == 0, len > 0 else { return [:] }
+        // Slack: an interface appearing between the size probe and the read would
+        // otherwise fail the read with ENOMEM.
+        len += 4096
         var buf = [UInt8](repeating: 0, count: len)
         guard sysctl(&mib, UInt32(mib.count), &buf, &len, nil, 0) == 0 else { return [:] }
 
         var result: [String: InterfaceCounters] = [:]
+        let hdrSize = MemoryLayout<if_msghdr2>.size
+        let nameOffset = MemoryLayout<sockaddr_dl>.offset(of: \.sdl_data)!
         buf.withUnsafeBytes { raw in
             var off = 0
             while off + MemoryLayout<if_msghdr>.size <= len {
                 let hdr = raw.loadUnaligned(fromByteOffset: off, as: if_msghdr.self)
                 let msglen = Int(hdr.ifm_msglen)
                 guard msglen > 0 else { break }
-                if Int32(hdr.ifm_type) == RTM_IFINFO2, off + MemoryLayout<if_msghdr2>.size <= len {
+                let end = off + msglen
+                if Int32(hdr.ifm_type) == RTM_IFINFO2, off + hdrSize <= len {
                     let h2 = raw.loadUnaligned(fromByteOffset: off, as: if_msghdr2.self)
-                    var cname = [CChar](repeating: 0, count: Int(IF_NAMESIZE) + 1)
-                    if if_indextoname(UInt32(h2.ifm_index), &cname) != nil {
-                        result[String(cString: cname)] = InterfaceCounters(
-                            inBytes: h2.ifm_data.ifi_ibytes,
-                            outBytes: h2.ifm_data.ifi_obytes,
-                            baudrate: h2.ifm_data.ifi_baudrate)
+                    // The sockaddr_dl on the wire is only as long as sdl_len says (it can be
+                    // shorter than the struct), so read the two header bytes we need, not
+                    // the whole struct.
+                    let dl = off + hdrSize
+                    if h2.ifm_addrs & RTA_IFP != 0, dl + nameOffset <= len {
+                        let family = Int32(raw[dl + 1])                       // sdl_family
+                        let nlen = Int(raw[dl + 5])                            // sdl_nlen
+                        let nameStart = dl + nameOffset
+                        if family == AF_LINK, nlen > 0, nameStart + nlen <= min(end, len) {
+                            let name = String(decoding: raw[nameStart..<nameStart + nlen], as: UTF8.self)
+                            result[name] = InterfaceCounters(
+                                inBytes: h2.ifm_data.ifi_ibytes,
+                                outBytes: h2.ifm_data.ifi_obytes,
+                                baudrate: h2.ifm_data.ifi_baudrate)
+                        }
                     }
                 }
-                off += msglen
+                off = end
             }
         }
         return result

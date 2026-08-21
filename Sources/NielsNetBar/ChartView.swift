@@ -154,6 +154,12 @@ final class ChartView: NSView {
     /// For `--dump-chart`.
     func simulateHover(at index: Int) { hoverIndex = index }
 
+    /// The menu closing does not send `mouseExited`, so the controller calls this to
+    /// avoid a stale highlighted bar the next time it opens.
+    func clearHover() {
+        if hoverIndex != nil { hoverIndex = nil; needsDisplay = true }
+    }
+
     override func updateTrackingAreas() {
         super.updateTrackingAreas()
         if let t = tracking { removeTrackingArea(t) }
