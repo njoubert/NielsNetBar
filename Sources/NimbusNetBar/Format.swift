@@ -14,11 +14,41 @@ enum Format {
         return (String(format: "%.1f", v / 1_000_000_000), "Gbps")
     }
 
-    /// Fixed-width rate for the menu bar: always `nnn.n Xbps` (5-char value), so the
-    /// status item does not change width between ticks. 999.9 kbps → 1.0 Mbps.
+    /// Fixed-width rate for the menu bar: three characters of value and a four-character
+    /// unit — `" 36 kb/s"`, `"1.2 Mb/s"`, `"341 Mb/s"`. Deliberately coarser than `rate`:
+    /// the bar is a glanceable indicator and the menu carries the precise figure, so three
+    /// characters of value buy back the width `999.9 kbps` cost. Fixed width because the
+    /// status item must not change size between ticks; the bar's font is monospaced, so
+    /// padding the value with spaces is enough to hold the columns still.
+    ///
+    /// Both roll-over points are set so the value can never reach a fourth character: below
+    /// 9.95 it keeps a decimal (`"9.9"`), above it rounds (`"36"`), and the unit steps up at
+    /// 999.5 rather than 1000 so we never print `"1000"`.
     static func rateFixed(bitsPerSecond bps: Double) -> String {
-        let (value, unit) = rate(bitsPerSecond: bps)
-        return String(repeating: " ", count: max(0, 5 - value.count)) + value + " " + unit
+        let bits = max(bps, 0)
+        let value: Double, unit: String
+        if bits < 999_500 { value = bits / 1_000; unit = "kb/s" }
+        else if bits < 999_500_000 { value = bits / 1_000_000; unit = "Mb/s" }
+        else { value = bits / 1_000_000_000; unit = "Gb/s" }
+        let text = value < 9.95 ? String(format: "%.1f", value) : String(format: "%.0f", value)
+        return String(repeating: " ", count: max(0, 3 - text.count)) + text + " " + unit
+    }
+
+    /// The menu's headline rate, at three significant figures — `("16.4", "kbps")`,
+    /// `("115", "kbps")`, `("341", "Mbps")`. The same rule the bar uses, one digit wider:
+    /// it caps the value at four characters (`"99.9"`) instead of the five `rate` can need
+    /// (`"999.9"`), which is what lets the headline stay large without the two columns
+    /// pushing the menu wider. Interface rows keep `rateCompact`'s full precision.
+    ///
+    /// The unit steps up at 999.5 rather than 1000 so the value can never round to `"1000"`
+    /// and overflow the field reserved for it.
+    static func rateHeadline(bitsPerSecond bps: Double) -> (value: String, unit: String) {
+        let bits = max(bps, 0)
+        let value: Double, unit: String
+        if bits < 999_500 { value = bits / 1_000; unit = "kbps" }
+        else if bits < 999_500_000 { value = bits / 1_000_000; unit = "Mbps" }
+        else { value = bits / 1_000_000_000; unit = "Gbps" }
+        return (value < 99.95 ? String(format: "%.1f", value) : String(format: "%.0f", value), unit)
     }
 
     /// Compact rate for menu rows: "12.4 Mbps".

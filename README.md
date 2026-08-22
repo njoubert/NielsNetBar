@@ -51,16 +51,22 @@ interfaces (`en*`; tunnels are left out because their packets are counted again 
 that carries them). Bits per second, SI prefixes, fixed width so it never jiggles:
 
 ```
-↑   1.3 Mbps
-↓  65.6 kbps
+↑ 1.3 Mb/s
+↓  66 kb/s
 ```
+
+Three characters of value, so the bar stays narrow: a decimal below 10 (`9.9 kb/s`), whole
+numbers above it, and the unit steps up before the value could reach a fourth digit. The
+dropdown carries the precise figure (`65.6 kbps`) — the bar is for glancing at.
 
 Sampled at 2 Hz by default; **Update Rate** in the menu offers 1 / 2 / 5 Hz and remembers
 the choice (`--hz N` overrides it for one run). The bar is only repainted when the digits
 change, and not at all while the screen is locked or the displays are asleep (sampling
 continues, so the chart and totals stay right); at 2 Hz it idles under 1 % CPU.
 
-**In the dropdown** — first the total with a **chart of the last 60 seconds**: one bar per
+**In the dropdown** — first the total, set large in two columns with `Download` / `Upload`
+under them, at three significant figures (`115 kbps`); the per-interface rows below carry the
+full precision. Then a **chart of the last 60 seconds**: one bar per
 second, blue ↑ growing up from the baseline and green ↓ growing down, on one linear scale set
 by the window's peak (labelled). It records from launch, so it is full the first time you
 open the menu, and keeps moving while the menu is open; hover a bar for that second's
@@ -74,7 +80,7 @@ System Settings › Network:
 |---|---|
 | 🟢 | link up and a routable address |
 | 🟡 | link up but no address, or only a self-assigned `169.254.x.x` |
-| ⚪ | down: no cable, Wi-Fi off / not associated. Shown as a single line. |
+| ⚪ | down: no cable, Wi-Fi off / not associated. Shown as a single line, and hidden by default — **Show Inactive Interfaces** in the menu lists them (with a count of how many there are). |
 
 Each connected interface lists its live ↓/↑ rate, IPv4 and IPv6 addresses, negotiated
 **link speed** (`10 Gbps` from the Ethernet media type; the current PHY rate for Wi-Fi),

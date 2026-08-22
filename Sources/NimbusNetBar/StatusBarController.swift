@@ -8,6 +8,11 @@ final class StatusBarController: NSObject, NSMenuDelegate {
 
     static let hzOptions: [Double] = [1, 2, 5]
     static let hzDefaultsKey = "updateHz"
+    /// Down interfaces are hidden unless asked for. A Mac with Thunderbolt bridges and unused
+    /// USB adapters lists a dozen of them and none are why anyone opened the menu — this one
+    /// has six. `bool(forKey:)` is false when the key is unset, so hidden is the default for
+    /// free, and turning it on is what gets written.
+    static let showInactiveDefaultsKey = "showInactiveInterfaces"
 
     private let item: NSStatusItem
     private let menu = NSMenu()
@@ -16,13 +21,14 @@ final class StatusBarController: NSObject, NSMenuDelegate {
     private var menuOpen = false
 
     // Rows that update live while the menu is open.
-    private var totalRow: NSMenuItem?
     /// The chart's natural width. It carries `autoresizingMask = [.width]`, so AppKit stretches
     /// it to whatever the menu is wide; because the same view is reused on every open, that
     /// stretched frame would become the menu's new minimum and the menu could only ever grow
     /// (measured: 633 pt → 649 pt on the next open). `rebuild()` resets it to this.
-    private static let chartWidth: CGFloat = 384
+    private static let chartWidth: CGFloat = 324
     private let chart = ChartView(frame: NSRect(x: 0, y: 0, width: chartWidth, height: ChartView.chartHeight))
+    /// Same deal as the chart: a view so it can be laid out against the menu's real width.
+    private let totals = TotalsView(frame: NSRect(x: 0, y: 0, width: chartWidth, height: TotalsView.height))
     private var rateRows: [String: NSMenuItem] = [:]
     private var ssidRows: [String: NSMenuItem] = [:]   // Wi-Fi bsd name → its SSID row
     private var totalsRow: NSMenuItem?
@@ -47,6 +53,8 @@ final class StatusBarController: NSObject, NSMenuDelegate {
         item.menu = menu
         item.button?.toolTip = "Nimbus Net Bar — network throughput"
         chart.history = { [weak self] in self?.monitor.history ?? [] }
+        totals.rate = { [weak self] in self?.monitor.total ?? NetworkMonitor.Rate() }
+        totals.copyText = { [weak self] in self?.totalCopyText() ?? "" }
         monitor.onTick = { [weak self] in self?.tick() }
         PublicIP.shared.onChange = { [weak self] in self?.updatePublicIPRows() }
         // Granting Location access mid-menu reveals the SSID: update that row in place
@@ -100,12 +108,14 @@ final class StatusBarController: NSObject, NSMenuDelegate {
 
     private static let barFont = NSFont.monospacedSystemFont(ofSize: 9, weight: .medium)
     private static let barLineHeight: CGFloat = 10.5   // two lines → 21 pt inside the 22 pt bar
-    /// Grey digits: a fixed mid-grey per appearance rather than the label colour with alpha,
-    /// which on a dark bar comes out nearly white. Tune the two `white:` values to taste.
+    /// Digits at close to full contrast against the bar, a fixed value per appearance rather
+    /// than the label colour with alpha (which on a dark bar comes out muddy). These were a
+    /// mid-grey once and the numbers were hard to read at 9 pt next to every other menu bar
+    /// item; near-white on dark and near-black on light is what the rest of the bar does.
     private static let barTextColor = NSColor(name: nil) { appearance in
         appearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
-            ? NSColor(white: 0.55, alpha: 1)
-            : NSColor(white: 0.40, alpha: 1)
+            ? NSColor(white: 0.92, alpha: 1)
+            : NSColor(white: 0.13, alpha: 1)
     }
 
     static let downColor = NSColor.systemGreen
@@ -148,7 +158,7 @@ final class StatusBarController: NSObject, NSMenuDelegate {
     private func tick() {
         if hiddenReasons.isEmpty { updateBar() }
         guard menuOpen else { return }
-        totalRow?.attributedTitle = totalTitle()
+        totals.needsDisplay = true
         chart.needsDisplay = true
         for (bsd, row) in rateRows {
             row.attributedTitle = rateTitle(bsd)
@@ -176,9 +186,9 @@ final class StatusBarController: NSObject, NSMenuDelegate {
         // Shrink the chart back to its natural width before measuring, or the menu inherits
         // the width of whatever the widest row was last time and never gets narrower again.
         chart.setFrameSize(NSSize(width: StatusBarController.chartWidth, height: ChartView.chartHeight))
+        totals.setFrameSize(NSSize(width: StatusBarController.chartWidth, height: TotalsView.height))
         rateRows = [:]
         ssidRows = [:]
-        totalRow = nil
         totalsRow = nil
         publicV4Row = nil
         publicV6Row = nil
@@ -191,13 +201,10 @@ final class StatusBarController: NSObject, NSMenuDelegate {
         LocationAccess.shared.requestIfNeededWhenInstalled()
 
         // Total + the last minute as a chart.
-        let total = NSMenuItem(title: "", action: #selector(copyValue(_:)), keyEquivalent: "")
-        total.target = self
-        total.attributedTitle = totalTitle()
-        total.representedObject = totalTitle().string
+        let total = NSMenuItem()
+        total.view = totals
         total.toolTip = "Sum over the physical interfaces — the number in the menu bar. Click to copy."
         menu.addItem(total)
-        totalRow = total
         let chartItem = NSMenuItem()
         chartItem.view = chart
         menu.addItem(chartItem)
@@ -216,11 +223,17 @@ final class StatusBarController: NSObject, NSMenuDelegate {
         publicV4Row = v4; publicV6Row = v6
         updatePublicIPRows()
 
+        let inactive = snapshot.interfaces.filter { $0.dot == .gray }
+        let shown = showInactive ? snapshot.interfaces : snapshot.interfaces.filter { $0.dot != .gray }
         if snapshot.interfaces.isEmpty {
             menu.addItem(disabled("No network interfaces found"))
+        } else if shown.isEmpty {
+            // Everything is down and hidden — say so, rather than leaving a blank gap between
+            // the public IP rows and the settings.
+            menu.addItem(disabled("No active interfaces"))
         }
         var lastWasCompact = false
-        for iface in snapshot.interfaces {
+        for iface in shown {
             let compact = iface.dot == .gray
             if !compact || !lastWasCompact { if menu.items.count > 0 { menu.addItem(.separator()) } }
             addInterface(iface)
@@ -241,6 +254,14 @@ final class StatusBarController: NSObject, NSMenuDelegate {
         }
         rate.submenu = sub
         menu.addItem(rate)
+
+        let inactiveItem = NSMenuItem(
+            title: inactive.isEmpty ? "Show Inactive Interfaces" : "Show Inactive Interfaces (\(inactive.count))",
+            action: #selector(toggleShowInactive(_:)), keyEquivalent: "")
+        inactiveItem.target = self
+        inactiveItem.state = showInactive ? .on : .off
+        inactiveItem.toolTip = "Interfaces with no link: empty Ethernet ports, unused Thunderbolt bridges, Wi-Fi when it is off."
+        menu.addItem(inactiveItem)
 
         let login = NSMenuItem(title: "Launch at Login", action: #selector(toggleLogin(_:)), keyEquivalent: "")
         login.target = self
@@ -382,16 +403,11 @@ final class StatusBarController: NSObject, NSMenuDelegate {
         return s
     }
 
-    private func totalTitle() -> NSAttributedString {
+    /// What clicking the row copies. The title is two tab-separated lines now, so its
+    /// `.string` would paste as a mess; this is the one-line version.
+    private func totalCopyText() -> String {
         let r = monitor.total
-        let s = NSMutableAttributedString()
-        s.append(NSAttributedString(string: "Total  ", attributes: [
-            .font: NSFont.menuFont(ofSize: 0).withWeight(.semibold)]))
-        s.append(NSAttributedString(string: "↓ ", attributes: [.font: StatusBarController.monoFont, .foregroundColor: StatusBarController.downColor]))
-        s.append(NSAttributedString(string: Format.rateCompact(bitsPerSecond: r.down), attributes: [.font: StatusBarController.monoFont]))
-        s.append(NSAttributedString(string: "    ↑ ", attributes: [.font: StatusBarController.monoFont, .foregroundColor: StatusBarController.upColor]))
-        s.append(NSAttributedString(string: Format.rateCompact(bitsPerSecond: r.up), attributes: [.font: StatusBarController.monoFont]))
-        return s
+        return "↓ \(Format.rateCompact(bitsPerSecond: r.down))  ↑ \(Format.rateCompact(bitsPerSecond: r.up))"
     }
 
     private func totalsTitle() -> NSAttributedString {
@@ -555,6 +571,16 @@ final class StatusBarController: NSObject, NSMenuDelegate {
             alert.informativeText = error.localizedDescription
             alert.runModal()
         }
+    }
+
+    private var showInactive: Bool {
+        UserDefaults.standard.bool(forKey: StatusBarController.showInactiveDefaultsKey)
+    }
+
+    @objc private func toggleShowInactive(_ sender: NSMenuItem) {
+        UserDefaults.standard.set(sender.state != .on, forKey: StatusBarController.showInactiveDefaultsKey)
+        // Clicking a menu item closes the menu, so the next open rebuilds with the new
+        // setting. Rebuilding here would be both pointless and a flicker (see `rebuild`).
     }
 
     @objc private func openNetworkSettings() {
