@@ -5,13 +5,19 @@
 <h1 align="center">Nimbus Net Bar</h1>
 
 <p align="center">
-  A menu bar network monitor for macOS, in Swift. Live ↑/↓ throughput in the bar; every
-  interface's state, addresses, link speed and Wi-Fi details in the dropdown.<br>
+  A menu bar system monitor for macOS, in Swift. Live ↑/↓ throughput in the bar and every
+  interface's state, addresses, link speed and Wi-Fi details in the dropdown — plus CPU,
+  GPU, memory, disk activity and disk space, each an optional widget with its own item in
+  the bar and its own menu.<br>
   No Dock icon, no window, no dependencies.
 </p>
 
 <p align="center">
   <img src="docs/screenshot.png" alt="Nimbus Net Bar: stacked upload/download rates in the menu bar, and the dropdown listing each interface with a status dot, rates, addresses, link speed, Wi-Fi details, gateway and DNS" width="434">
+</p>
+
+<p align="center">
+  <em>The network widget. The others are off by default — see <a href="#widgets">Widgets</a>.</em>
 </p>
 
 ```
@@ -93,6 +99,8 @@ width and PHY mode. The primary interface also shows the **gateway** and **DNS**
 
 Below that: the **Widgets** submenu, the update-rate submenu, a **Launch at Login**
 checkbox, a shortcut to Network Settings, Quit.
+
+<a name="widgets"></a>
 
 ### Widgets
 
