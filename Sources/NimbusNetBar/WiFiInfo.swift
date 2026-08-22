@@ -116,8 +116,17 @@ final class LocationAccess: NSObject, CLLocationManagerDelegate {
     var isAuthorized: Bool { status == .authorizedAlways || status == .authorized }
     var isDenied: Bool { status == .denied || status == .restricted }
 
+    /// Set once we have fired the OS prompt. macOS shows the "allow?" dialog only the first
+    /// time `requestWhenInUseAuthorization()` is called for an app — every later call is a
+    /// silent no-op. So after this is set, a user asking for access must be sent to Settings
+    /// instead (see StatusBarController.requestLocation), or the click does nothing.
+    static let requestedDefaultsKey = "locationRequested"
+    var hasRequestedOnce: Bool { UserDefaults.standard.bool(forKey: LocationAccess.requestedDefaultsKey) }
+
     func requestIfNeeded() {
-        if status == .notDetermined { manager.requestWhenInUseAuthorization() }
+        guard status == .notDetermined else { return }
+        UserDefaults.standard.set(true, forKey: LocationAccess.requestedDefaultsKey)
+        manager.requestWhenInUseAuthorization()
     }
 
     /// True only for a copy installed in /Applications. A dev build is ad-hoc signed and is a

@@ -455,10 +455,14 @@ final class StatusBarController: NSObject, NSMenuDelegate {
             setRow(it, label: "SSID", value: "unavailable", copy: nil)
         } else {
             // Two short lines rather than one long one: a single line here was by far the
-            // widest thing in the menu and stretched the whole dropdown.
-            setRow(it, label: "SSID", value: LocationAccess.shared.isDenied
-                   ? "hidden — Location access denied\nClick to open Privacy settings"
-                   : "hidden — click to allow Location access\nmacOS gates the network name on it",
+            // widest thing in the menu and stretched the whole dropdown. The wording has to
+            // match what the click will actually do — we can only raise the OS prompt while
+            // it is still unspent, otherwise the click just opens Settings.
+            let canPrompt = LocationAccess.shared.status == .notDetermined
+                && !LocationAccess.shared.hasRequestedOnce
+            setRow(it, label: "SSID", value: canPrompt
+                   ? "hidden — click to allow Location access\nmacOS gates the network name on it"
+                   : "hidden — Location access is off\nClick to open Privacy settings",
                    copy: nil, valueColor: .systemYellow)
             it.action = #selector(requestLocation)
         }
@@ -558,10 +562,14 @@ final class StatusBarController: NSObject, NSMenuDelegate {
     }
 
     @objc private func requestLocation() {
-        if LocationAccess.shared.isDenied {
-            NSWorkspace.shared.open(LocationAccess.settingsURL)
-        } else {
+        // The OS prompt appears only for the very first request; after that it is a silent
+        // no-op. So prompt only when we genuinely can (never asked, still undecided); in every
+        // other case — denied, restricted, or the one prompt already spent — open Settings,
+        // which always does something visible and is where the user can flip the switch.
+        if LocationAccess.shared.status == .notDetermined && !LocationAccess.shared.hasRequestedOnce {
             LocationAccess.shared.requestIfNeeded()
+        } else {
+            NSWorkspace.shared.open(LocationAccess.settingsURL)
         }
     }
 }
