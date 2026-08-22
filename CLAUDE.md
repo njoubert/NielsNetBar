@@ -149,7 +149,8 @@ itself also carries `Contents/Resources/LICENSE`. The app phones home only to
 README saying so; it's what reviewers of a menu bar tool look for.
 
 **Signing.** `build.sh` reads `SIGN_IDENTITY` / `NOTARY_PROFILE` from a git-ignored
-`.signing` file (or the environment). When set, release bundles are signed with the
+`.signing` file (or the environment). The notary credentials are per Apple ID + team, not per
+app, so one profile serves every project — don't name it after this one. When set, release bundles are signed with the
 Developer ID (`--options runtime --timestamp`), the app is notarized (zipped, submitted,
 stapled) and then the DMG is signed, notarized and stapled too, so both the image and a
 copy dragged out of it verify offline; the DMG background drops its "unsigned" footer
