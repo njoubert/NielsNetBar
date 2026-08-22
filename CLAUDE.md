@@ -158,9 +158,12 @@ copy dragged out of it verify offline; the DMG background drops its "unsigned" f
 path working, it's what any machine without the certificate uses. `./build.sh status`
 shows who signed the installed copy and Gatekeeper's verdict. Notarization waits on Apple
 (minutes, occasionally longer); failures: `xcrun notarytool log <id> --keychain-profile …`.
-The private key lives only in this Mac's login keychain — it is backed up as a `.p12`,
-not re-downloadable. The membership is annual; if it lapses, already-notarized releases
-keep working forever, new builds fall back to ad-hoc.
+The private key is not re-downloadable from Apple: a machine can only sign if the key has
+been imported into its login keychain from a `.p12` export, and `notarytool
+store-credentials` has been run there. Setting up a second Mac means doing both — until then
+`security find-identity -v -p codesigning` finds nothing and builds silently fall back to
+ad-hoc. The membership is annual; if it lapses, already-notarized releases keep working
+forever, new builds fall back to ad-hoc.
 
 A Homebrew cask is possible once releases are stable (fixed download URL + the DMG's
 `shasum -a 256`). GPL-3.0 makes the Mac App Store a non-option, deliberately.
