@@ -60,21 +60,21 @@ enum AppIcon {
     /// The throughput trace: a smooth line through a handful of peaks, filled underneath.
     private static func drawTrace(_ ctx: CGContext) {
         let pts: [CGPoint] = [
-            CGPoint(x: 150, y: 330), CGPoint(x: 250, y: 372), CGPoint(x: 330, y: 290),
-            CGPoint(x: 410, y: 430), CGPoint(x: 500, y: 300), CGPoint(x: 580, y: 470),
-            CGPoint(x: 660, y: 350), CGPoint(x: 740, y: 410), CGPoint(x: 874, y: 318),
+            CGPoint(x: 150, y: 300), CGPoint(x: 250, y: 342), CGPoint(x: 330, y: 260),
+            CGPoint(x: 410, y: 400), CGPoint(x: 500, y: 270), CGPoint(x: 580, y: 440),
+            CGPoint(x: 660, y: 320), CGPoint(x: 740, y: 380), CGPoint(x: 874, y: 288),
         ]
         let line = smoothPath(through: pts)
         let area = CGRect(x: 150, y: 0, width: 724, height: 520)
 
         // Fill under the line, fading out downwards.
         let fill = line.mutableCopy()!
-        fill.addLine(to: CGPoint(x: 874, y: 150))
-        fill.addLine(to: CGPoint(x: 150, y: 150))
+        fill.addLine(to: CGPoint(x: 874, y: 120))
+        fill.addLine(to: CGPoint(x: 150, y: 120))
         fill.closeSubpath()
         ctx.saveGState()
         ctx.addPath(fill); ctx.clip()
-        fillLinear(ctx, from: CGPoint(x: 0, y: 470), to: CGPoint(x: 0, y: 150),
+        fillLinear(ctx, from: CGPoint(x: 0, y: 440), to: CGPoint(x: 0, y: 120),
                    stops: [(0, green.copy(alpha: 0.30)!), (1, blue.copy(alpha: 0.0)!)], rect: area)
         ctx.restoreGState()
 
@@ -91,8 +91,10 @@ enum AppIcon {
     }
 
     /// ↑ in blue (upload) and ↓ in green (download), side by side above the trace.
+    /// Sits a little below the body's top edge (about 10 % of it) so the icon does not
+    /// read as top-heavy; the trace is placed to leave the same gap under the arrows.
     private static func drawArrows(_ ctx: CGContext) {
-        let top: CGFloat = 850, bottom: CGFloat = 560
+        let top: CGFloat = 800, bottom: CGFloat = 535
         let head: CGFloat = 100
         let w: CGFloat = 74
         let up = CGMutablePath()
