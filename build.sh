@@ -29,7 +29,7 @@ cd "$(dirname "$0")"
 
 NAME=NielsNetBar
 BUNDLE_ID=com.njoubert.nielsnetbar
-VERSION=1.0
+VERSION=1.1
 INSTALL_DIR=/Applications
 INSTALLED="$INSTALL_DIR/$NAME.app"
 DEV_APP="dist/debug/$NAME.app"

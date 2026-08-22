@@ -21,7 +21,7 @@
 ./build.sh uninstall      # remove the Login Item, the app, and its preferences
 ./build.sh status         # running? installed? login item?
 ./build.sh app            # release build → dist/NielsNetBar.app only
-./build.sh dmg            # release build → dist/NielsNetBar-1.0.dmg, drag-to-Applications disk image
+./build.sh dmg            # release build → dist/NielsNetBar-<version>.dmg, drag-to-Applications disk image
 ./build.sh icon           # re-render docs/icon.png
 ```
 
