@@ -305,7 +305,7 @@ case "$cmd" in
     fi
     if [ -e "$INSTALLED" ]; then
       say "installed: $INSTALLED (v$(defaults read "$INSTALLED/Contents/Info" CFBundleShortVersionString 2>/dev/null || echo '?'))"
-      sig=$(codesign -dv "$INSTALLED" 2>&1 || true)
+      sig=$(codesign -dv --verbose=2 "$INSTALLED" 2>&1 || true)   # Authority= lines need verbose=2
       auth=$(printf '%s\n' "$sig" | grep -m1 '^Authority=' | cut -d= -f2- || true)
       gate=$(spctl -a -t exec -v "$INSTALLED" 2>&1 || true)   # "source=Notarized Developer ID" when stapled/notarized
       note "signed by: ${auth:-ad-hoc (no identity)}  ·  Gatekeeper: ${gate#*: }"
