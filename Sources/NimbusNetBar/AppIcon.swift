@@ -17,9 +17,16 @@ enum AppIcon {
     private static let green = rgb(0x3D, 0xE8, 0x9C)   // download
     private static let blue = rgb(0x3A, 0xA8, 0xFF)    // upload
 
+    /// The scale of the current render: shadow offsets and blurs are in *base* space (the
+    /// CTM does not scale them), so every `setShadow` below multiplies by this — otherwise a
+    /// blur sized for the 1024 canvas is that many device pixels at every size, and at the
+    /// 128-pt icon the body shadow runs off the bottom edge and is clipped to a hard line.
+    nonisolated(unsafe) private static var scale: CGFloat = 1
+
     static func draw(in ctx: CGContext, size: CGFloat) {
         ctx.saveGState()
-        ctx.scaleBy(x: size / ref, y: size / ref)
+        scale = size / ref
+        ctx.scaleBy(x: scale, y: scale)
 
         let body = CGRect(x: bodyInset, y: bodyInset, width: ref - 2 * bodyInset, height: ref - 2 * bodyInset)
         let shape = CGPath(roundedRect: body, cornerWidth: bodyRadius, cornerHeight: bodyRadius, transform: nil)
@@ -28,7 +35,7 @@ enum AppIcon {
         // canvas: a shadow that is still visible at the edge gets clipped to a hard line,
         // which shows as a grey box on light backgrounds (e.g. the disk image window).
         ctx.saveGState()
-        ctx.setShadow(offset: CGSize(width: 0, height: -12), blur: 28,
+        ctx.setShadow(offset: CGSize(width: 0, height: -12 * scale), blur: 28 * scale,
                       color: NSColor(calibratedWhite: 0, alpha: 0.45).cgColor)
         ctx.addPath(shape); ctx.setFillColor(NSColor.black.cgColor); ctx.fillPath()
         ctx.restoreGState()
@@ -80,7 +87,7 @@ enum AppIcon {
 
         // The line itself: thick, round, blue → green left to right, with a soft glow.
         ctx.saveGState()
-        ctx.setShadow(offset: .zero, blur: 28, color: green.copy(alpha: 0.55))
+        ctx.setShadow(offset: .zero, blur: 28 * scale, color: green.copy(alpha: 0.55))
         ctx.addPath(line)
         ctx.setLineWidth(30); ctx.setLineCap(.round); ctx.setLineJoin(.round)
         ctx.replacePathWithStrokedPath()
@@ -108,7 +115,7 @@ enum AppIcon {
 
         for (path, color) in [(up, blue), (down, green)] {
             ctx.saveGState()
-            ctx.setShadow(offset: .zero, blur: 34, color: color.copy(alpha: 0.6))
+            ctx.setShadow(offset: .zero, blur: 34 * scale, color: color.copy(alpha: 0.6))
             ctx.addPath(path)
             ctx.setStrokeColor(color)
             ctx.setLineWidth(w); ctx.setLineCap(.round); ctx.setLineJoin(.round)

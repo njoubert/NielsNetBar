@@ -199,9 +199,12 @@ A Homebrew cask is possible once releases are stable (fixed download URL + the D
   `loginItemRegistered` default; the menu toggle sets it too. Never auto-register when the
   default is set — a user's "off" must stick across updates. `SMAppService` registers the
   bundle that calls it, so `uninstall` must unregister *before* deleting the app.
-- **Icon shadow must fade out inside the canvas.** A shadow still visible at the edge is
-  clipped to a hard line and shows as a grey box on light backgrounds (the DMG window).
-  Check edge alpha is 0 after touching `AppIcon.draw`.
+- **Shadow offset and blur are in base space.** `CGContext.setShadow` ignores the CTM, so a
+  blur sized for the 1024-pt reference canvas is that many *device pixels* at every render
+  size — at the 128-pt icon the body shadow ran off the bottom edge and was clipped to a hard
+  line (visible in the DMG window and Finder). Every `setShadow` in `AppIcon` multiplies by
+  the render scale (size / 1024). After touching the icon, check the edge alpha is 0 at
+  256 px as well as 1024 px by reading back the bitmap's outermost rows and columns.
 - **DMG layout.** Geometry is shared by `DMGBackground.swift` (640×440, icon centres
   170/210 and 470/210) and the AppleScript in `build.sh`; change both. Finder's window
   `bounds` include the 28 pt title bar, and Finder adds the *hidden* sidebar's remembered
