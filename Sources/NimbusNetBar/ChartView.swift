@@ -2,9 +2,37 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import AppKit
 
-/// The throughput history chart at the top of the menu: one bar per second for the last
-/// minute, mirrored around a baseline — blue ↑ grows up, green ↓ grows down — on a single
-/// linear scale set by the window's peak. Hovering a bar shows that second's numbers.
+/// How a chart draws one metric: which colours, which glyphs, how a value reads as text,
+/// and what sets the vertical scale.
+struct ChartStyle {
+
+    /// `.mirrored` — two series around a centre line (network ↑/↓, disk write/read).
+    /// `.single`   — one series growing up from the bottom (GPU, memory).
+    /// `.stacked`  — the two series summed into one bar, primary at the bottom (CPU
+    ///               user under system).
+    enum Mode { case mirrored, single, stacked }
+
+    var mode: Mode = .mirrored
+    /// Drawn above the baseline, and the only series in `.single` mode.
+    var primaryColor: NSColor
+    /// Drawn below the baseline; unused in `.single` mode.
+    var secondaryColor: NSColor = .clear
+    var primaryGlyph: String = ""
+    var secondaryGlyph: String = ""
+    /// A value → the short text the peak and hover labels show ("12.4 Mbps", "34 %").
+    var format: (Double) -> String
+    /// The scale follows the window's peak, but never drops below this — otherwise an idle
+    /// minute is a wall of full-height bars.
+    var minPeak: Double = 1
+    /// A fixed ceiling for the scale (100 for a percentage) instead of the window's peak.
+    /// When set no "peak …" label is drawn: a scale that never moves says nothing.
+    var fixedPeak: Double?
+}
+
+/// The history chart at the top of a widget's menu: one bar per second for the last minute.
+/// Two-series metrics are mirrored around a centre line — the primary series grows up, the
+/// secondary hangs down — on a single linear scale. Hovering a bar shows that second's
+/// numbers.
 final class ChartView: NSView {
 
     static let chartHeight: CGFloat = 128
@@ -13,13 +41,15 @@ final class ChartView: NSView {
     private static let gap: CGFloat = 1
     private static let labelFont = NSFont.monospacedDigitSystemFont(ofSize: 9, weight: .medium)
 
-    var history: () -> [NetworkMonitor.Rate] = { [] }
+    var history: () -> [Sample] = { [] }
+    var style: ChartStyle
     /// `--dump-chart` only: paint a menu-like background so the light text is visible.
     var debugBackground = false
     private var hoverIndex: Int?
     private var tracking: NSTrackingArea?
 
-    override init(frame: NSRect) {
+    init(frame: NSRect, style: ChartStyle) {
+        self.style = style
         super.init(frame: frame)
         autoresizingMask = [.width]
     }
@@ -56,7 +86,7 @@ final class ChartView: NSView {
     }
 
     private var barWidth: CGFloat {
-        let n = CGFloat(NetworkMonitor.historyLength)
+        let n = CGFloat(History.length)
         return (plotRect.width - (n - 1) * ChartView.gap) / n
     }
 
@@ -65,7 +95,7 @@ final class ChartView: NSView {
         let rel = x - plotRect.minX
         guard rel >= 0 else { return nil }
         let i = Int(rel / (barWidth + ChartView.gap))
-        return i < NetworkMonitor.historyLength ? i : nil
+        return i < History.length ? i : nil
     }
 
     // MARK: Drawing
@@ -80,12 +110,20 @@ final class ChartView: NSView {
 
         let plot = plotRect
         let samples = history()
-        let n = NetworkMonitor.historyLength
+        let n = History.length
         // Right-align: the newest second is the rightmost bar.
         let offset = n - samples.count
-        let peak = max(samples.map { max($0.down, $0.up) }.max() ?? 0, 1_000)  // ≥ 1 kbps so idle isn't a wall of full bars
-        let half = plot.height / 2 - 1
-        let baseline = plot.midY
+        let mirrored = style.mode == .mirrored
+        let windowPeak: Double
+        switch style.mode {
+        case .mirrored: windowPeak = samples.map { max($0.primary, $0.secondary) }.max() ?? 0
+        case .single:   windowPeak = samples.map(\.primary).max() ?? 0
+        case .stacked:  windowPeak = samples.map { $0.primary + $0.secondary }.max() ?? 0
+        }
+        let peak = style.fixedPeak ?? max(windowPeak, style.minPeak)
+        // Mirrored splits the plot around its middle; a single series gets the whole height.
+        let span = mirrored ? plot.height / 2 - 1 : plot.height - 2
+        let baseline = mirrored ? plot.midY : plot.minY + 1
         let bw = barWidth
 
         // Baseline.
@@ -101,29 +139,57 @@ final class ChartView: NSView {
             let x = plot.minX + CGFloat(i) * (bw + ChartView.gap)
             let hovered = hoverIndex == i
             let alpha: CGFloat = hoverIndex == nil ? 0.85 : (hovered ? 1 : 0.6)
-            let down = max(2, half * CGFloat(r.down / peak))
-            let up = max(2, half * CGFloat(r.up / peak))
-            // Blue ↑ upload rises above the baseline; green ↓ download hangs below it.
-            StatusBarController.upColor.withAlphaComponent(r.up > 0 ? alpha : 0.25).setFill()
+            if style.mode == .stacked {
+                // The whole bar in the secondary colour, then the primary share painted
+                // over it from the baseline up: the straight edge between them is the split.
+                let sum = r.primary + r.secondary
+                let h = max(2, span * CGFloat(min(sum / peak, 1)))
+                style.secondaryColor.withAlphaComponent(sum > 0 ? alpha : 0.25).setFill()
+                roundedTop(NSRect(x: x, y: baseline + 1, width: bw, height: h), up: true).fill()
+                let h1 = min(h, span * CGFloat(min(r.primary / peak, 1)))
+                if h1 > 0 {
+                    style.primaryColor.withAlphaComponent(alpha).setFill()
+                    NSRect(x: x, y: baseline + 1, width: bw, height: h1).fill()
+                }
+                continue
+            }
+            let up = max(2, span * CGFloat(min(r.primary / peak, 1)))
+            style.primaryColor.withAlphaComponent(r.primary > 0 ? alpha : 0.25).setFill()
             roundedTop(NSRect(x: x, y: baseline + 1, width: bw, height: up), up: true).fill()
-            StatusBarController.downColor.withAlphaComponent(r.down > 0 ? alpha : 0.25).setFill()
+            guard mirrored else { continue }
+            let down = max(2, span * CGFloat(min(r.secondary / peak, 1)))
+            style.secondaryColor.withAlphaComponent(r.secondary > 0 ? alpha : 0.25).setFill()
             roundedTop(NSRect(x: x, y: baseline - 1 - down, width: bw, height: down), up: false).fill()
         }
 
         // Peak label, top-right; hover readout, top-left.
         let labelAttrs: [NSAttributedString.Key: Any] = [.font: ChartView.labelFont, .foregroundColor: NSColor.secondaryLabelColor]
-        let peakText = NSAttributedString(string: "peak \(Format.rateCompact(bitsPerSecond: peak))", attributes: labelAttrs)
         let labels = labelRect
-        peakText.draw(at: NSPoint(x: labels.maxX - peakText.size().width, y: labels.minY + 1))
+        if style.fixedPeak == nil {
+            let peakText = NSAttributedString(string: "peak \(style.format(peak))", attributes: labelAttrs)
+            peakText.draw(at: NSPoint(x: labels.maxX - peakText.size().width, y: labels.minY + 1))
+        }
 
         if let h = hoverIndex, h - offset >= 0, h - offset < samples.count {
             let r = samples[h - offset]
             let age = n - 1 - h
             let s = NSMutableAttributedString(string: age == 0 ? "now   " : "−\(age) s   ", attributes: labelAttrs)
-            s.append(NSAttributedString(string: "↓ ", attributes: [.font: ChartView.labelFont, .foregroundColor: StatusBarController.downColor]))
-            s.append(NSAttributedString(string: Format.rateCompact(bitsPerSecond: r.down) + "   ", attributes: [.font: ChartView.labelFont, .foregroundColor: NSColor.labelColor]))
-            s.append(NSAttributedString(string: "↑ ", attributes: [.font: ChartView.labelFont, .foregroundColor: StatusBarController.upColor]))
-            s.append(NSAttributedString(string: Format.rateCompact(bitsPerSecond: r.up), attributes: [.font: ChartView.labelFont, .foregroundColor: NSColor.labelColor]))
+            func part(_ glyph: String, _ color: NSColor, _ value: Double, trailing: String = "") {
+                if !glyph.isEmpty {
+                    s.append(NSAttributedString(string: glyph + " ", attributes: [.font: ChartView.labelFont, .foregroundColor: color]))
+                }
+                s.append(NSAttributedString(string: style.format(value) + trailing, attributes: [.font: ChartView.labelFont, .foregroundColor: NSColor.labelColor]))
+            }
+            switch style.mode {
+            case .mirrored:
+                part(style.secondaryGlyph, style.secondaryColor, r.secondary, trailing: "   ")
+                part(style.primaryGlyph, style.primaryColor, r.primary)
+            case .stacked:
+                part(style.primaryGlyph, style.primaryColor, r.primary, trailing: "   ")
+                part(style.secondaryGlyph, style.secondaryColor, r.secondary)
+            case .single:
+                part(style.primaryGlyph, style.primaryColor, r.primary)
+            }
             s.draw(at: NSPoint(x: labels.minX, y: labels.minY + 1))
         }
     }

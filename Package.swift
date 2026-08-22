@@ -13,6 +13,8 @@ let package = Package(
             name: "NimbusNetBar",
             linkerSettings: [
                 .linkedFramework("AppKit"),
+                .linkedFramework("IOKit"),
+                .linkedFramework("Metal"),
                 .linkedFramework("CoreWLAN"),
                 .linkedFramework("CoreLocation"),
                 .linkedFramework("SystemConfiguration"),

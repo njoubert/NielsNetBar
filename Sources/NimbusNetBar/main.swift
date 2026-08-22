@@ -13,14 +13,25 @@ import AppKit
 //   --render-iconset DIR    write an .iconset (for iconutil) and exit
 //   --render-dmg-background DIR [--signed]   write the disk image's background PNGs (1× and 2×)
 //                           and exit; --signed omits the "unsigned build" footer
-//   --dump-bar PATH         render just the status item to PATH, quit (layout check)
-//   --dump-chart PATH       render the history chart with fake data to PATH, quit
-//   --print                 print what the menu would show, as text, and quit
+//   --dump-bar PATH [--widget ID] [--after S]   render a status item to PATH, quit (layout
+//                           check); ID is a widget id (network, cpu), default the first one
+//                           showing; --after waits S seconds first (60+ fills a sparkline)
+//   --dump-chart PATH [--single]   render the history chart with fake data to PATH, quit;
+//                           --single draws it as a one-series chart (the scalar widgets)
+//   --dump-cores PATH       render the CPU menu's per-core rings with fake loads → PNG
+//   --dump-segbar PATH      render the memory menu's segmented bars with fake values → PNG
+//   --print                 print the network data as text (no UI) and quit
+//   --print-menu [ID]       print a widget's built menu as text and quit (needs the UI,
+//                           so it launches, waits --after seconds, prints and exits)
 
 struct Options {
     var hz: Double?
     var enableLoginItem = false
     var dumpBarPath: String?
+    var dumpBarWidget: String?
+    var dumpBarAfter: TimeInterval = 2.5
+    var printMenuWidget: String?
+    var printMenu = false
 }
 
 func usage() -> Never {
@@ -62,21 +73,90 @@ while !args.isEmpty {
     case "--render-iconset": renderIconsetDir = takeValue(a)
     case "--render-dmg-background": renderDMGBackgroundDir = takeValue(a)
     case "--signed": dmgSigned = true
+    case "--print-menu":
+        options.printMenu = true
+        if let next = args.first, !next.hasPrefix("-") { options.printMenuWidget = args.removeFirst() }
     case "--dump-bar": options.dumpBarPath = takeValue(a)
+    case "--widget": options.dumpBarWidget = takeValue(a)
+    case "--after":
+        guard let v = Double(takeValue(a)), v > 0, v <= 300 else { fputs("--after must be 0–300\n", stderr); usage() }
+        options.dumpBarAfter = v
     case "--dump-chart":
         // Render the history chart with synthetic data (layout check, no screen grab needed).
         let path = takeValue(a)
+        let single = args.first == "--single"
+        if single { args.removeFirst() }
         MainActor.assumeIsolated {
             NSApplication.shared.appearance = NSAppearance(named: .darkAqua)
-            let v = ChartView(frame: NSRect(x: 0, y: 0, width: 448, height: ChartView.chartHeight))
-            let fake: [NetworkMonitor.Rate] = (0..<52).map { i in
-                NetworkMonitor.Rate(down: Double(i % 9) * 1_400_000 + (i % 4 == 0 ? 6_000_000 : 0), up: Double(i % 5) * 400_000)
+            // A percentage-shaped stand-in for the scalar widgets: one series, fixed 0–100 scale.
+            let singleStyle = ChartStyle(
+                mode: .single,
+                primaryColor: .systemOrange,
+                format: { String(format: "%.0f %%", $0) },
+                fixedPeak: 100)
+            let v = ChartView(frame: NSRect(x: 0, y: 0, width: 448, height: ChartView.chartHeight),
+                              style: single ? singleStyle : NetworkWidget.chartStyle)
+            let fake: [Sample] = (0..<52).map { i in
+                single
+                    ? Sample(primary: Double((i * 7) % 55) + Double(i % 3) * 12)
+                    : Sample(primary: Double(i % 5) * 400_000,
+                             secondary: Double(i % 9) * 1_400_000 + (i % 4 == 0 ? 6_000_000 : 0))
             }
             v.history = { fake }
             v.simulateHover(at: 40)
             v.debugBackground = true
             guard let rep = v.bitmapImageRepForCachingDisplay(in: v.bounds) else { exit(1) }
             v.cacheDisplay(in: v.bounds, to: rep)
+            try? rep.representation(using: .png, properties: [:])?.write(to: URL(fileURLWithPath: path))
+            print("wrote \(path)")
+        }
+        exit(0)
+    case "--dump-cores":
+        // The per-core rings with synthetic loads (layout check, no screen grab needed).
+        let path = takeValue(a)
+        MainActor.assumeIsolated {
+            NSApplication.shared.appearance = NSAppearance(named: .darkAqua)
+            let groups = CPUInfo.coreGroups
+            let v = CoreGaugesView(frame: NSRect(x: 0, y: 0, width: 324,
+                                                 height: CoreGaugesView.coresHeight))
+            v.groups = {
+                groups.enumerated().map { i, g in
+                    CoreGaugesView.Group(
+                        name: g.name,
+                        color: i == 0 ? .systemBlue : .systemGreen,
+                        loads: g.range.enumerated().map { k, _ in
+                            i == 0 ? [0.92, 0.61, 0.34, 0.08][k % 4] : [0.05, 0.18, 0.02, 0.11][k % 4]
+                        })
+                }
+            }
+            v.debugBackground = true
+            guard let rep = v.bitmapImageRepForCachingDisplay(in: v.bounds) else { exit(1) }
+            v.cacheDisplay(in: v.bounds, to: rep)
+            try? rep.representation(using: .png, properties: [:])?.write(to: URL(fileURLWithPath: path))
+            print("wrote \(path)")
+        }
+        exit(0)
+    case "--dump-segbar":
+        // The memory menu's bars: a single-value meter over a four-part breakdown.
+        let path = takeValue(a)
+        MainActor.assumeIsolated {
+            NSApplication.shared.appearance = NSAppearance(named: .darkAqua)
+            let w: CGFloat = 324, h = SegmentBarView.height
+            let container = NSView(frame: NSRect(x: 0, y: 0, width: w, height: h * 2 + 8))
+            let meter = SegmentBarView(frame: NSRect(x: 0, y: h + 8, width: w, height: h))
+            meter.segments = { [.init(color: .systemTeal, fraction: 0.37)] }
+            meter.debugBackground = true
+            let stack = SegmentBarView(frame: NSRect(x: 0, y: 0, width: w, height: h))
+            stack.segments = {
+                [.init(color: .systemBlue, fraction: 0.117),
+                 .init(color: .systemRed, fraction: 0.30),
+                 .init(color: .systemIndigo, fraction: 0.254)]
+            }
+            stack.debugBackground = true
+            container.addSubview(meter)
+            container.addSubview(stack)
+            guard let rep = container.bitmapImageRepForCachingDisplay(in: container.bounds) else { exit(1) }
+            container.cacheDisplay(in: container.bounds, to: rep)
             try? rep.representation(using: .png, properties: [:])?.write(to: URL(fileURLWithPath: path))
             print("wrote \(path)")
         }
@@ -137,8 +217,7 @@ if let path = renderIconPath {
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
     let options: Options
-    var monitor: NetworkMonitor!
-    var statusBar: StatusBarController!
+    var widgets: Widgets!
 
     init(options: Options) { self.options = options }
 
@@ -147,11 +226,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // this also covers running the bare binary.)
         NSApp.setActivationPolicy(.accessory)
 
-        let savedHz = UserDefaults.standard.double(forKey: StatusBarController.hzDefaultsKey)
+        let savedHz = UserDefaults.standard.double(forKey: Widgets.hzDefaultsKey)
         let hz = options.hz ?? (savedHz > 0 ? savedHz : 2)
-        monitor = NetworkMonitor(interval: 1 / hz)
-        statusBar = StatusBarController(monitor: monitor)
-        monitor.start()
+        widgets = Widgets(hz: hz)
+        widgets.start()
 
         // Login Item. `build.sh install` passes --enable-login-item; a drag-install from the
         // disk image has nobody to pass it, so the first launch from /Applications registers
@@ -169,11 +247,39 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // (see requestIfNeededWhenInstalled). Opening the menu asks again if this was missed.
         LocationAccess.shared.requestIfNeededWhenInstalled()
 
-        if let path = options.dumpBarPath {
-            let t = Timer(timeInterval: 2.5, repeats: false) { [weak self] _ in
+        if options.printMenu {
+            let t = Timer(timeInterval: options.dumpBarAfter, repeats: false) { [weak self] _ in
                 Task { @MainActor in
-                    let ok = self?.statusBar.dumpBar(to: path) ?? false
-                    NSLog(ok ? "bar → \(path)" : "bar dump failed")
+                    guard let c = self?.widgets.controller(named: self?.options.printMenuWidget) else {
+                        fputs("no such widget showing\n", stderr); exit(1)
+                    }
+                    // Build once and throw it away, then again a beat later: the rows fed by
+                    // two process walks (the busiest-process lists) are empty until there are
+                    // two, which is exactly what a real menu shows for its first second.
+                    _ = c.dumpMenu()
+                    let settle = Timer(timeInterval: 1.4, repeats: false) { _ in
+                        MainActor.assumeIsolated {
+                            print(c.dumpMenu())
+                            exit(0)
+                        }
+                    }
+                    RunLoop.main.add(settle, forMode: .common)
+                }
+            }
+            RunLoop.main.add(t, forMode: .common)
+        }
+
+        if let path = options.dumpBarPath {
+            let t = Timer(timeInterval: options.dumpBarAfter, repeats: false) { [weak self] _ in
+                Task { @MainActor in
+                    // Say which of the two went wrong: "failed" alone reads as a rendering
+                    // problem when usually the widget is simply switched off.
+                    guard let c = self?.widgets.controller(named: self?.options.dumpBarWidget) else {
+                        fputs("no such widget showing — check `defaults read \(Bundle.main.bundleIdentifier ?? "") | grep widget`\n", stderr)
+                        exit(2)
+                    }
+                    let ok = c.dumpBar(to: path)
+                    NSLog(ok ? "bar → \(path)" : "bar dump failed (the status item has no size — is it hidden?)")
                     exit(ok ? 0 : 1)
                 }
             }

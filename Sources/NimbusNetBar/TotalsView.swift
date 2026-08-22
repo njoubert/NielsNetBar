@@ -15,7 +15,7 @@ import AppKit
 ///
 /// Same trap as `ChartView`, and the same fix: because the instance is reused across opens,
 /// the stretched frame would become the menu's new minimum and the menu could only ever get
-/// wider. `StatusBarController.rebuild()` resets the frame first.
+/// wider. `NetworkWidget.buildMenu` resets the frame first.
 final class TotalsView: NSView {
 
     static let height: CGFloat = 54
@@ -67,8 +67,8 @@ final class TotalsView: NSView {
 
     override func draw(_ dirtyRect: NSRect) {
         let r = rate()
-        drawColumn(0, arrow: "↓", color: StatusBarController.downColor, bps: r.down, caption: "Download")
-        drawColumn(1, arrow: "↑", color: StatusBarController.upColor, bps: r.up, caption: "Upload")
+        drawColumn(0, arrow: "↓", color: Theme.downColor, bps: r.down, caption: "Download")
+        drawColumn(1, arrow: "↑", color: Theme.upColor, bps: r.up, caption: "Upload")
     }
 
     private func drawColumn(_ i: Int, arrow: String, color: NSColor, bps: Double, caption: String) {

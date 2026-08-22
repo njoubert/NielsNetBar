@@ -11,13 +11,13 @@ struct InterfaceCounters {
     var baudrate: UInt64
 }
 
-/// Samples the kernel's interface counters on a timer and turns them into rates.
+/// Turns the kernel's interface counters into rates, once per tick of the shared `Ticker`.
 ///
 /// Counters come from `sysctl(NET_RT_IFLIST2)`, which hands back one `if_msghdr2` per
 /// interface with 64-bit `ifi_ibytes`/`ifi_obytes` — no subprocess, no parsing, tens of
 /// microseconds per tick.
 @MainActor
-final class NetworkMonitor {
+final class NetworkMonitor: Sampler {
 
     struct Rate { var down: Double = 0; var up: Double = 0 }   // bits per second
 
@@ -32,58 +32,26 @@ final class NetworkMonitor {
     /// Called on the main thread after every sample.
     var onTick: (() -> Void)?
 
-    /// The last `historyLength` seconds of `total`, oldest first, one entry per second
-    /// (samples at 2/5 Hz are averaged into their second). Recorded from launch, so the
-    /// chart is full the first time the menu opens.
-    private(set) var history: [Rate] = []
-    static let historyLength = 60
-    private var bucketSecond: Int
-    private var bucketBits = Rate()          // accumulated bits in the current second
-    private var bucketTime: TimeInterval = 0 // and the time those bits cover
+    /// The last minute of `total`, one entry per second: ↑ upload above the baseline,
+    /// ↓ download below. Recorded from launch, so the chart is full the first time the
+    /// menu opens.
+    private var hist = History(now: 0)
+    var history: [Sample] { hist.samples }
+    /// Whether the last sample closed a second — see `History.advanced`.
+    var historyAdvanced: Bool { hist.advanced }
 
-    var interval: TimeInterval {
-        didSet { if timer != nil { start() } }
-    }
-
-    private var timer: Timer?
     private var last: [String: InterfaceCounters] = [:]
-    private var lastTime: TimeInterval
+    private var lastTime: TimeInterval = 0
 
-    init(interval: TimeInterval) {
-        self.interval = interval
+    // MARK: Sampler
+
+    func prime(at now: TimeInterval) {
         last = NetworkMonitor.readCounters()
-        lastTime = NetworkMonitor.now()
-        bucketSecond = Int(lastTime)
+        lastTime = now
+        hist = History(now: now)
     }
 
-    func start() {
-        timer?.invalidate()
-        // The timer fires on the main run loop, so it is already on the main actor; no
-        // need to bounce through a Task (which would cost a second wake-up per tick).
-        let t = Timer(timeInterval: interval, repeats: true) { [weak self] _ in
-            MainActor.assumeIsolated { self?.sample() }
-        }
-        // A little slack lets the kernel coalesce our wake-up with others (energy).
-        t.tolerance = interval / 10
-        // .common so the bar keeps updating while the dropdown menu is open (menu
-        // tracking runs the run loop in a mode the default timer mode is not part of).
-        RunLoop.main.add(t, forMode: .common)
-        timer = t
-    }
-
-    func stop() {
-        timer?.invalidate()
-        timer = nil
-    }
-
-    /// Seconds on a monotonic clock that keeps counting through sleep (CLOCK_MONOTONIC
-    /// does on Darwin). Wall-clock time can step backwards (NTP) and would stall sampling.
-    nonisolated static func now() -> TimeInterval {
-        Double(clock_gettime_nsec_np(CLOCK_MONOTONIC)) / 1e9
-    }
-
-    private func sample() {
-        let now = NetworkMonitor.now()
+    func sample(at now: TimeInterval) {
         let dt = now - lastTime
         guard dt > 0.05 else { return }
         let current = NetworkMonitor.readCounters()
@@ -111,30 +79,8 @@ final class NetworkMonitor {
         total = sum
         last = current
         lastTime = now
-        record(sum, dt: dt, at: now)
+        hist.add(Sample(primary: sum.up, secondary: sum.down), dt: dt, at: now)
         onTick?()
-    }
-
-    /// Fold a sample into the per-second history.
-    private func record(_ r: Rate, dt: TimeInterval, at now: TimeInterval) {
-        let second = Int(now)
-        if second != bucketSecond {
-            // Close the bucket we were filling…
-            if bucketTime > 0 {
-                history.append(Rate(down: bucketBits.down / bucketTime, up: bucketBits.up / bucketTime))
-            }
-            // …and pad any seconds with no sample at all (a slow tick rate can't cause that,
-            // but sleep/wake can) with silence, so the time axis stays honest.
-            let gap = second - bucketSecond - 1
-            if gap > 0 { history.append(contentsOf: repeatElement(Rate(), count: min(gap, NetworkMonitor.historyLength))) }
-            if history.count > NetworkMonitor.historyLength { history.removeFirst(history.count - NetworkMonitor.historyLength) }
-            bucketSecond = second
-            bucketBits = Rate()
-            bucketTime = 0
-        }
-        bucketBits.down += r.down * dt
-        bucketBits.up += r.up * dt
-        bucketTime += dt
     }
 
     /// Which interfaces make up the number in the menu bar: the physical ports (`en*`,
