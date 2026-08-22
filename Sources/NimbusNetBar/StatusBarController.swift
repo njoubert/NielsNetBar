@@ -499,14 +499,14 @@ final class StatusBarController: NSObject, NSMenuDelegate {
         }
     }
 
-    /// "Nimbus Net Bar 1.2 (21)" — marketing version plus the build number, which is the
+    /// "Nimbus Net Bar v1.2 (23)" — marketing version plus the build number, which is the
     /// commit count, so a report pins down the exact source it came from.
     private static func versionString() -> String {
         let info = Bundle.main.infoDictionary
         let name = info?["CFBundleName"] as? String ?? "Nimbus Net Bar"
         guard let short = info?["CFBundleShortVersionString"] as? String else { return "\(name) — dev build" }
         let build = info?["CFBundleVersion"] as? String
-        return build.map { "\(name) \(short) (\($0))" } ?? "\(name) \(short)"
+        return build.map { "\(name) v\(short) (\($0))" } ?? "\(name) v\(short)"
     }
 
     private static func dotImage(_ dot: Dot) -> NSImage {
