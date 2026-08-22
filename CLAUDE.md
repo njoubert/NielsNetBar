@@ -16,8 +16,20 @@ how to measure, and the traps already found.
   `// Copyright (C) 2026 Niels Joubert` / `// SPDX-License-Identifier: GPL-3.0-or-later`.
   The project is GPL-3.0-or-later; don't vendor code under an incompatible licence.
 - **This is a long-running app.** Every change on the per-tick path (`NetworkMonitor.sample`,
-  `StatusBarController.tick`/`updateBar`) is a change to something that runs twice a second
-  for weeks. Measure before and after (below); the budget is well under 1 % CPU idle.
+  `WidgetController.tick`/`updateBar`) is a change to something that runs twice a second
+  for weeks. Measure before and after (below). Measured on an M3 (8 cores, 6 interfaces,
+  2 Hz, menus closed, release build, CPU delta over a 620 s window):
+
+  | | CPU | note |
+  |---|---|---|
+  | network only | 0.79 % | the same before and after the widget refactor |
+  | all six widgets | 2.08 % | 0 leaks, RSS 45 MB |
+  | all six, when the bars still showed numbers | 2.87 % | what removing the digits was worth |
+
+  So a widget costs roughly **0.26 points**, almost all of it the status-item repaint rather
+  than the sampling. That is the accepted price of an opt-in widget (all of them are off by
+  default) — but a change that moves the *per-repaint* cost, or that repaints more often than
+  once a second, is a regression and must be measured.
 - **It is installed and running on this machine** (`/Applications/Nimbus Net Bar.app`, a Login
   Item). `build.sh run` and `install` quit every running copy first —
   that's by design, but say so before running them, and `./build.sh install` afterwards to
@@ -28,13 +40,31 @@ how to measure, and the traps already found.
 ```
 Sources/NimbusNetBar/
   main.swift              flag parsing, AppDelegate, first-launch Login Item registration
-  NetworkMonitor.swift    timer + sysctl(NET_RT_IFLIST2) counters → rates, 60 s history
-  StatusBarController.swift  the status item image, the menu, live rows, visibility pause
+  Ticker.swift            the one timer + the `Sampler` protocol every metric implements
+  History.swift           `Sample` (one or two series) + the 60 s, one-bucket-per-second ring
+  NetworkMonitor.swift    a Sampler: sysctl(NET_RT_IFLIST2) counters → rates
+  Widget.swift            the `Widget` protocol, `BarContent`/`BarLine`/`SparkStyle`, `Theme`
+  Widgets.swift           which widgets are on, the Widgets submenu, the visibility pause
+  WidgetController.swift  one status item: the bar image, the menu lifecycle, shared rows
+  NetworkWidget.swift     the network widget's bar lines and menu (interfaces, Wi-Fi, IPs)
+  CPUSampler.swift        host_processor_info per-core ticks + CPUInfo (brand, P/E groups)
+  CPUWidget.swift         the CPU widget's bar line, sparkline and menu
+  GPUSampler.swift        IOAccelerator PerformanceStatistics, paired to Metal by registryID
+  GPUWidget.swift         the GPU widget
+  MemorySampler.swift     host_statistics64(HOST_VM_INFO64) + swap and pressure sysctls
+  MemoryWidget.swift      the memory widget
+  DiskSampler.swift       IOBlockStorageDriver byte counters → read/write rates
+  DiskIOWidget.swift      the disk activity widget (a rate pair, like the network)
+  CapacitySampler.swift   mounted volumes, refreshed off the main thread every 10 s
+  CapacityWidget.swift    the disk space widget (a fill bar, not a sparkline)
+  ProcessList.swift       one proc_listpids + proc_pid_rusage walk, shared, menu-open only
   Interfaces.swift        the dropdown's data: SCNetworkInterface, getifaddrs, SIOCGIFMEDIA,
                           SCDynamicStore (primary/router/DNS), service order
   WiFiInfo.swift          CoreWLAN details + LocationAccess (the SSID is gated on it)
   PublicIP.swift          ipify lookup, only when the menu opens, cached on success
-  ChartView.swift         the 60 s bar chart in the menu
+  ChartView.swift         the 60 s bar chart in the menu, styled per metric (`ChartStyle`)
+  CoreGaugesView.swift    the CPU menu's per-core rings + legend, one row per perf level
+  SegmentBarView.swift    a horizontal bar of coloured segments (memory pressure/breakdown/swap)
   Format.swift            number formatting (bits, SI, fixed-width for the bar)
   LoginItem.swift         SMAppService wrapper + the "registered once" default
   AppIcon.swift           the icon, drawn in code → .iconset/.icns at bundle time
@@ -57,10 +87,26 @@ because they already run on the main thread. Keep it that way rather than sprink
 ./build.sh stop
 ./build.sh install               release → /Applications, launch, register Login Item
 ./build.sh dmg                   release → dist/NimbusNetBar-<version>.dmg
-.build/debug/NimbusNetBar --print         the menu's data as text + a 1 s rate sample (no UI)
-.build/debug/NimbusNetBar --dump-bar P    the status-item image → PNG
-.build/debug/NimbusNetBar --dump-chart P  the chart with fake data → PNG
+NimbusNetBar --print                   the network data as text + a 1 s rate sample (no UI)
+NimbusNetBar --print-menu [ID]         a widget's built menu as rows of text
+NimbusNetBar --dump-bar P [--widget ID] [--after S]   a status item → PNG
+NimbusNetBar --dump-chart P [--single] the menu chart with fake data → PNG
+NimbusNetBar --dump-cores P            the per-core rings with fake loads → PNG
+NimbusNetBar --dump-segbar P           the memory menu's segmented bars → PNG
 ```
+
+Run the debug flags from **the bundle** (`"dist/debug/Nimbus Net Bar.app/Contents/MacOS/NimbusNetBar"`),
+not `.build/debug/NimbusNetBar`: a bare binary has no bundle id, so it reads none of the
+app's defaults — including which widgets are switched on.
+
+`--print-menu` is the substitute for clicking the real menu when the machine running the
+agent has no Accessibility permission. It builds the menu twice, 1.4 s apart, and prints the
+second: the process lists need two walks before they have a rate to show, exactly as the
+real menu does for its first second. It exercises `buildMenu`, not AppKit's menu tracking —
+widths, hover and flicker still need the real thing.
+
+`--after S` on `--dump-bar` waits before rendering: a sparkline needs 60 s to fill, so
+`--after 70` is what shows one properly.
 
 There are no unit tests; `--print` is the quickest correctness check for the data path
 (compare with `ifconfig` / `netstat -ib`). Dev builds are ad-hoc signed, so macOS sees
@@ -109,8 +155,23 @@ heap $PID | head                         # node count; take two, minutes apart, 
 
 Baselines on a Mac Studio (M-series, 32 interfaces, 2 Hz, menu closed, release build):
 **0.83 % CPU, 0 leaks, heap flat over 1000 ticks** — after the fixes below. Before them
-it was 2.7 %. `readCounters()` costs ~40 µs per call; a 500-iteration microbenchmark of a
-copy of the function is the way to check a change there.
+it was 2.7 %. A 500-iteration microbenchmark of a copy of the function is the way to check
+a change to any of the per-tick readers. Measured costs, per call:
+
+| | cost | how often |
+|---|---|---|
+| `NetworkMonitor.readCounters()` | ~40 µs | every tick, network widget on |
+| `CPUSampler.readTicks()` | ~9 µs (M3, 8 cores) | every tick, CPU widget on |
+| `GPUSampler.read()` | ~30 µs (one GPU) | every tick, GPU widget on |
+| `CapacitySampler.readVolumes()` | blocks — never on the main thread | every 10 s, off-main |
+| `ProcessList.walk()` | ~1.3 ms (578 procs) | at most 1 Hz, **only while a menu is open** |
+
+Compare like with like: an M3 laptop with 6 interfaces idles lower than the Studio those
+baselines came from, so measure a before *and* an after on the machine in front of you
+rather than against the number above. The honest way is a **delta over a window** — read
+`ps -o time=` twice and divide by the wall seconds between — because that drops the launch
+transient. Do not busy-wait (`until …; do :; done`) while a window is open: it burns a core
+and lands in the measurement.
 
 ## Release and distribution
 
@@ -133,7 +194,8 @@ The deliverable is the disk image. Nothing is automated beyond `build.sh dmg`; a
    invalidates the staple and costs another full notarization round, and the DMG copy is the
    exact artifact users get. Quit the running copy first; the Login Item registration points
    at the path, so replacing the bundle in place keeps it.
-5. **Tag and publish** (`gh` is logged in as njoubert):
+5. **Tag and publish** (check `gh auth status` first — it is not necessarily the upstream
+   owner's account; on at least one machine it is a contributor's):
    ```
    git tag -a v<VERSION> -m "Nimbus Net Bar <VERSION>"
    git push origin main --tags
@@ -175,7 +237,7 @@ A Homebrew cask is possible once releases are stable (fixed download URL + the D
 - **Repainting the status item is the other cost.** `NSStatusItem.button.image = …` means
   text layout + rasterise + `_adjustLength` + a CA commit. Skip it when the text is unchanged,
   and don't paint at all while the screen is locked / displays asleep / session inactive
-  (`hiddenReasons` in StatusBarController). Sampling must continue regardless so the chart
+  (`hiddenReasons` in `Widgets`). Sampling must continue regardless so the chart
   and "since launch" totals stay honest.
 - **Clocks.** Rates and history buckets use `CLOCK_MONOTONIC`, which on macOS keeps counting
   through sleep; `Date()` can step backwards under NTP and stalled sampling. Don't switch to
@@ -208,6 +270,15 @@ A Homebrew cask is possible once releases are stable (fixed download URL + the D
 - **Unsigned build.** Ad-hoc signed, not notarized: a quarantined DMG (browser, AirDrop) is
   refused until allowed in System Settings › Privacy & Security ("Open Anyway"); on macOS 15
   right-click › Open no longer works. Notarizing needs an Apple Developer ID.
+- **Gap padding must not treat a slow tick as sleep.** `History` fills seconds no sample
+  covered with silence, which is right after a sleep/wake and *wrong* at 0.5 Hz, where every
+  sample legitimately spans two seconds — every other bucket came out as zero. A sample now
+  fills the seconds its own `dt` covers, up to `History.maxSpread` (4 s); past that it is a
+  stall, not a slow rate, and the seconds are silence again. Verified by driving the real
+  `History` at 0.2/0.5/1/2 s intervals: no silent buckets at any rate, and a simulated 30 s
+  sleep still pads. Compile it standalone to re-check — it only imports Foundation:
+  `swiftc Sources/NimbusNetBar/History.swift yourtest.swift` (the test file must be
+  `main.swift` for top-level code).
 - **The macOS Location prompt is one-shot.** `requestWhenInUseAuthorization()` raises the
   dialog only on the *first* call an app (bundle id) ever makes; every later call is a silent
   no-op. So any "click to allow" affordance must check whether the prompt is still available
@@ -226,5 +297,130 @@ A Homebrew cask is possible once releases are stable (fixed download URL + the D
   stretched frame became the menu's new minimum (measured: 633 pt → 649 pt on the next open).
   `rebuild()` resets it to `chartWidth` first. Any long row therefore widens the menu
   permanently — keep notices to two short lines rather than one long one.
+- **`MTLDevice.registryID` *is* the `IOAccelerator`'s IOKit registry entry id** (checked:
+  Metal says 4294968365 where `ioreg` shows id 0x10000042d), so
+  `IORegistryEntryIDMatching` pairs a Metal device with its statistics exactly, instead of
+  matching on class names like `AGXAcceleratorG15G`. Use `MTLCopyAllDevices`, not
+  `MTLCreateSystemDefaultDevice`, which can force a GPU switch on an older dual-GPU Mac.
+- **The GPU's "Alloc system memory" is address space, not memory in use.** It reads ~14 GB
+  on an idle 24 GB M3 while "In use system memory" reads 28 MB. Showing the first as "VRAM
+  used" would be alarming and wrong; the menu shows in-use and dims the other as "Reserved".
+- **`IOBlockStorageDriver` carries no name and no BSD name** — its child `IOMedia` is the
+  entry called "APPLE SSD AP0512Z Media" and holding `BSD Name`. `kIOMaxPathLen` does not
+  import into Swift; `io_name_t` is 128 bytes.
+- **`volumeAvailableCapacityForImportantUsage` is not `df`'s "avail".** It counts space the
+  system would reclaim by evicting purgeable files (snapshots, caches): 227 GB here against
+  `df`'s 150 Gi. That is deliberate — it is the number Finder shows, and the one a user can
+  actually spend.
+- **Only one volume is visible on a stock Mac.** `mountedVolumeURLs(.skipHiddenVolumes)`
+  presents the system+data pair as the single "Macintosh HD", so the APFS
+  container-grouping path in `CapacityWidget` **has not been exercised on this machine** —
+  it needs a second visible volume in one container. Check it before trusting it.
+- **`proc_pid_rusage`'s `ri_user_time`/`ri_system_time` are mach absolute time units, not
+  nanoseconds.** On Apple Silicon one unit is 41.67 ns (timebase 125/3), so treating them as
+  nanoseconds under-reports every process by ~42× — the busiest-process list showed a
+  pegged `yes` spinner as "2%". Measured: a thread busy for exactly 2.000 s of wall on one
+  core reads 99.9 % converted, 2.4 % not. On Intel the timebase is 1:1, so the bug is
+  invisible there; convert through `mach_timebase_info` always (`ProcessList.nanos`).
+- **Repainting the status item costs far more than `sample` admits.** A CPU widget that
+  followed its (constantly changing) number at 2 Hz measured **2.59 %** against the
+  network-only app's **0.79 %** — and `sample` could only account for ~1.1 % on the main
+  thread, every other thread idle. The rest is system time in the window-server round trip
+  that `button.image =` triggers: the process is parked in `mach_msg` for it, so a sampler
+  sees nothing while `ps -o time=` charges us for all of it. Repainting once a second
+  instead brought it to **1.14 %**. Never diagnose this path with `sample` alone — measure
+  the CPU delta over a window.
+- **`host_processor_info` hands over memory you must free.** The kernel allocates the
+  per-core array in our address space; without the `vm_deallocate` in `readTicks`'s `defer`
+  it leaks on every tick, forever.
+- **CPU tick counters are 32-bit and wrap** (~497 days at 100 Hz per core). Difference them
+  with `&-`, not `-`.
+- **Core order on Apple Silicon: `hw.perflevel0` (Performance) is CPUs 0…n first**, then
+  perflevel1 (Efficiency) — confirmed on an M3 by loading them: a compile lands on 0–3, a
+  low-QoS spinner (`yes`) lands on 4–7. Don't assume the reverse "E-cores first" folklore,
+  but do re-confirm it the same way if the grouping ever looks wrong.
+- **`proc_pid_rusage` only reads your own processes.** Measured here: 887 pids listed, 579
+  readable — exactly the ones this user owns; `launchd` and every root daemon refuse. So the
+  busiest-process lists are labelled "(yours)" and must stay that way; making them complete
+  would mean asking for privileges this app has no business having.
+- **One design language across the menus.** Section headings are `sectionHeader`: small,
+  semibold, dim, left-aligned, sentence case. They are deliberately quiet — an earlier
+  version was centred, uppercase and accent-blue, copied from another app's menu, and it
+  looked bolted on. The separator above a heading already does the dividing.
+- **Right-align quantities, left-align identifiers.** `setTableRow` puts the value on a tab
+  stop so a column of numbers can be scanned; `setRow` keeps the value beside its label. An
+  IP address, SSID or MAC is not compared down a column, so the network menu keeps `setRow`
+  and every metric widget uses `setTableRow`. Don't mix the two inside one menu.
+- **Show one decomposition of a quantity, not two.** The memory menu used to cut the same
+  24 GB three ways at once — a stacked chart of resident/compressed, a pressure block listing
+  wired and compressed again, and a breakdown bar of wired/active/compressed/free. Wired and
+  compressed each appeared twice with the same number, which reads as a bug. Now: the chart
+  plots exactly what the menu bar sparkline plots (memory used), the Pressure section is a
+  *state* and carries no breakdown at all, and "Where it is" is the only place memory is
+  divided up. App memory and cached files sit there too but dimmed and without a swatch,
+  because they overlap the four slices rather than adding to them — the tooltip says so.
+  If a fifth figure is ever added, work out first whether it is a slice or a lens.
+- **A section heading and its rows should not repeat the same word.** Under a "Swap" heading
+  the row is "In use", not "Swap"; under "Pressure" the rows name what the figures actually
+  are ("Unreclaimable", "Kernel signal").
+- **Nothing in the bar repaints more than once a second.** Every widget backed by a history
+  repaints only when `Sampler.historyAdvanced` says a one-second bucket closed, and only if
+  what it draws actually moved. That includes the rate pairs: the network's number changes on
+  nearly every tick when there is traffic, so following it at 2 Hz — or 5 Hz — bought nothing
+  but repaints, which is the one thing this app cannot afford. `CapacitySampler` keeps no
+  history and says so (`keepsHistory == false`), so its widget repaints on content change
+  instead; without that it would never repaint at all, having no second boundary to reach.
+- **Sixty buckets do not fit in a 32 pt sparkline as bars** (well under a device pixel each),
+  which is why `WidgetController.drawSpark` draws a filled line instead. Bars stay in the
+  menu's chart, where each second has real width and can be hovered.
+- **Submenus default to `autoenablesItems = true`** and will re-enable an item you set
+  `isEnabled = false` on. `Widgets.buildSubmenu` turns it off so the last-widget item stays
+  disabled.
+- **Scalar labels are drawn as a column of letters, not a word.** "MEM" across costs ~30 pt
+  of menu bar; stacked it costs 6, and with six widgets on that is the difference between
+  fitting and not. `Theme.stackedLabelFont` / `WidgetController.scalarImage`.
+- **Paging is far too bursty for a per-tick rate.** `pageins` moved by *one page in five
+  seconds* on an idle machine here, so a half-second delta reads "0.0 kB/s" essentially
+  always. `MemorySampler` differences against the oldest reading in a rolling 3 s window
+  instead. Before concluding the page rows are broken, check the raw counter actually moved
+  (`vm_stat | grep Pageins` twice) — measured here it genuinely did not.
+- **The memory "Pressure" percentage is this app's own stated formula** — wired plus
+  compressed over the physical total, i.e. the share of RAM the system cannot reclaim on
+  demand — and the tooltip says so in as many words. It is deliberately *not* presented as
+  Activity Monitor's pressure figure, whose curve Apple does not document and which this app
+  will not guess at; the kernel's own three-state signal sits beside it in the Kernel signal
+  row. Don't quietly swap in a different formula; if one is ever needed, change the tooltip
+  with it, because the whole point is that the number is explained rather than mysterious.
+- **`Format.memory`'s whole-number shortening needs a tight tolerance.** At 0.005 a 4.998 GB
+  reading printed as "5 GB" next to a "6.23 GB" beside it, which reads as two different
+  precisions. It is 0.0005 now, so only genuinely round values (installed RAM, a 2.00 GB
+  swap file) lose their decimals.
+- **No widget shows a number in the bar** — a coloured label and a sparkline (or, for Disk
+  Space, a pie), nothing else. It was asked for: digits next to a graph are distracting. It
+  also makes them cheaper, because with no digits to change the repaint test comes down to
+  whether the sparkline moved, so an idle GPU sitting at zero never repaints at all. Every
+  value lives on the status item's tooltip and at the top of its menu. Don't "fix" this by
+  putting the numbers back.
+- **Top-N process rows are never hidden.** Five rows are built once and filled — blanks when
+  there is nothing to say. Hiding them resized the menu about once a second as processes
+  crossed the threshold, which slid the rows below out from under the pointer mid-click.
+  `WidgetController.makeTopRows`/`fillTopRows` are the shared implementation; use them.
+- **`--dump-bar` on a widget that is switched off used to say "bar dump failed"**, which
+  reads as a rendering bug and sent this session chasing one twice. It now says "no such
+  widget showing" and tells you which defaults to check. When a bar or menu dump behaves
+  oddly, check `defaults read com.njoubert.nimbusnetbar | grep widget` *first*.
+- **`defaults write` while the app is running gets reverted.** A copy that has the domain
+  cached will flush its own stale snapshot over your write the next time it writes anything
+  itself (it writes `locationRequested` at launch), and two of the `widget.*.enabled` keys
+  silently went back to 0 that way mid-session. Quit every copy first, write, then launch.
+  This is a testing trap, not an app bug — `setEnabled` is the only writer of those keys and
+  it only runs from the Widgets submenu.
+- **A bar sparkline pinned to a fixed 0–100 is a flat line.** An idle machine at 14 % is
+  1.5 pt of an 11 pt strip. The number carries the absolute value; the sparkline auto-scales
+  to its own window so it carries the shape. The menu's chart keeps the fixed 0–100 scale.
+- **The app must never end up with every widget off.** No Dock icon, no window: there would
+  be no menu to switch one back on and no way to quit but Activity Monitor. `Widgets.start`
+  falls back to the first widget, and the last enabled item in the Widgets submenu is
+  disabled.
 - **Interfaces that count toward the bar total** are `en*`, `ppp*`, `pdp_ip*` only; tunnels
   are excluded on purpose (their bytes are re-sent over a physical port — double counting).

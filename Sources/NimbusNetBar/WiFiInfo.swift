@@ -119,7 +119,7 @@ final class LocationAccess: NSObject, CLLocationManagerDelegate {
     /// Set once we have fired the OS prompt. macOS shows the "allow?" dialog only the first
     /// time `requestWhenInUseAuthorization()` is called for an app — every later call is a
     /// silent no-op. So after this is set, a user asking for access must be sent to Settings
-    /// instead (see StatusBarController.requestLocation), or the click does nothing.
+    /// instead (see NetworkWidget.requestLocation), or the click does nothing.
     static let requestedDefaultsKey = "locationRequested"
     var hasRequestedOnce: Bool { UserDefaults.standard.bool(forKey: LocationAccess.requestedDefaultsKey) }
 
