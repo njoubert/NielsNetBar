@@ -120,6 +120,18 @@ final class LocationAccess: NSObject, CLLocationManagerDelegate {
         if status == .notDetermined { manager.requestWhenInUseAuthorization() }
     }
 
+    /// True only for a copy installed in /Applications. A dev build is ad-hoc signed and is a
+    /// brand-new app to macOS on every rebuild, so it must never auto-prompt — it would ask
+    /// again after every `build.sh run`. Dev builds use the menu's click-to-allow row instead.
+    static var isInstalledCopy: Bool { Bundle.main.bundlePath.hasPrefix("/Applications/") }
+
+    /// Ask, but only for the installed copy. Safe to call repeatedly: it is a no-op once the
+    /// question has been answered, and CoreLocation coalesces a repeat while a prompt is up.
+    func requestIfNeededWhenInstalled() {
+        guard LocationAccess.isInstalledCopy else { return }
+        requestIfNeeded()
+    }
+
     nonisolated func locationManagerDidChangeAuthorization(_ manager: CLLocationManager) {
         let s = manager.authorizationStatus
         Task { @MainActor in

@@ -165,12 +165,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             UserDefaults.standard.set(true, forKey: LoginItem.registeredDefaultsKey)
         }
 
-        // The SSID needs Location access. Ask once, automatically, but only for the installed
-        // copy: an ad-hoc signed dev build is a "new app" to macOS on every rebuild and would
-        // re-prompt each time (the menu has a row to ask on demand instead).
-        if Bundle.main.bundlePath.hasPrefix("/Applications/") {
-            LocationAccess.shared.requestIfNeeded()
-        }
+        // The SSID needs Location access. Ask automatically, but only for the installed copy
+        // (see requestIfNeededWhenInstalled). Opening the menu asks again if this was missed.
+        LocationAccess.shared.requestIfNeededWhenInstalled()
 
         if let path = options.dumpBarPath {
             let t = Timer(timeInterval: 2.5, repeats: false) { [weak self] _ in

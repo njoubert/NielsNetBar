@@ -17,7 +17,12 @@ final class StatusBarController: NSObject, NSMenuDelegate {
 
     // Rows that update live while the menu is open.
     private var totalRow: NSMenuItem?
-    private let chart = ChartView(frame: NSRect(x: 0, y: 0, width: 384, height: ChartView.chartHeight))
+    /// The chart's natural width. It carries `autoresizingMask = [.width]`, so AppKit stretches
+    /// it to whatever the menu is wide; because the same view is reused on every open, that
+    /// stretched frame would become the menu's new minimum and the menu could only ever grow
+    /// (measured: 633 pt → 649 pt on the next open). `rebuild()` resets it to this.
+    private static let chartWidth: CGFloat = 384
+    private let chart = ChartView(frame: NSRect(x: 0, y: 0, width: chartWidth, height: ChartView.chartHeight))
     private var rateRows: [String: NSMenuItem] = [:]
     private var ssidRows: [String: NSMenuItem] = [:]   // Wi-Fi bsd name → its SSID row
     private var totalsRow: NSMenuItem?
@@ -168,6 +173,9 @@ final class StatusBarController: NSObject, NSMenuDelegate {
 
     private func rebuild() {
         menu.removeAllItems()
+        // Shrink the chart back to its natural width before measuring, or the menu inherits
+        // the width of whatever the widest row was last time and never gets narrower again.
+        chart.setFrameSize(NSSize(width: StatusBarController.chartWidth, height: ChartView.chartHeight))
         rateRows = [:]
         ssidRows = [:]
         totalRow = nil
@@ -177,6 +185,10 @@ final class StatusBarController: NSObject, NSMenuDelegate {
 
         snapshot = Interfaces.snapshot()
         PublicIP.shared.refreshIfStale()
+        // A prompt at launch can go unnoticed (it appears while the user is looking elsewhere).
+        // Opening the menu is the moment they care about the SSID, so ask again if it is still
+        // unanswered; this is a no-op once it has been answered either way.
+        LocationAccess.shared.requestIfNeededWhenInstalled()
 
         // Total + the last minute as a chart.
         let total = NSMenuItem(title: "", action: #selector(copyValue(_:)), keyEquivalent: "")
@@ -396,11 +408,27 @@ final class StatusBarController: NSObject, NSMenuDelegate {
         it.target = self
         it.indentationLevel = 1
         it.representedObject = copy
+        let labelText = label + "  "
+        let labelAttrs: [NSAttributedString.Key: Any] = [
+            .font: NSFont.menuFont(ofSize: 0), .foregroundColor: NSColor.secondaryLabelColor]
         let s = NSMutableAttributedString()
-        s.append(NSAttributedString(string: label + "  ", attributes: [
-            .font: NSFont.menuFont(ofSize: 0), .foregroundColor: NSColor.secondaryLabelColor]))
-        s.append(NSAttributedString(string: value, attributes: [
+        s.append(NSAttributedString(string: labelText, attributes: labelAttrs))
+        // A value may carry a second line (the Location notice). Indent it under the first
+        // and dim it, so it reads as a continuation rather than another row.
+        let lines = value.components(separatedBy: "\n")
+        s.append(NSAttributedString(string: lines[0], attributes: [
             .font: StatusBarController.monoFont, .foregroundColor: valueColor]))
+        if lines.count > 1 {
+            let indent = NSAttributedString(string: labelText, attributes: labelAttrs).size().width
+            let ps = NSMutableParagraphStyle()
+            ps.firstLineHeadIndent = indent
+            ps.headIndent = indent
+            ps.paragraphSpacingBefore = 2
+            s.append(NSAttributedString(string: "\n" + lines.dropFirst().joined(separator: "\n"), attributes: [
+                .font: NSFont.menuFont(ofSize: NSFont.smallSystemFontSize),
+                .foregroundColor: NSColor.secondaryLabelColor,
+                .paragraphStyle: ps]))
+        }
         it.attributedTitle = s
         it.toolTip = toolTip ?? (copy == nil ? nil : "Click to copy")
     }
@@ -414,9 +442,11 @@ final class StatusBarController: NSObject, NSMenuDelegate {
         } else if LocationAccess.shared.isAuthorized {
             setRow(it, label: "SSID", value: "unavailable", copy: nil)
         } else {
+            // Two short lines rather than one long one: a single line here was by far the
+            // widest thing in the menu and stretched the whole dropdown.
             setRow(it, label: "SSID", value: LocationAccess.shared.isDenied
-                   ? "hidden — Location access denied; click to open Privacy settings"
-                   : "hidden — click to allow Location access (macOS gates the network name on it)",
+                   ? "hidden — Location access denied\nClick to open Privacy settings"
+                   : "hidden — click to allow Location access\nmacOS gates the network name on it",
                    copy: nil, valueColor: .systemYellow)
             it.action = #selector(requestLocation)
         }
