@@ -1,20 +1,20 @@
 #!/usr/bin/env bash
-# Build, run and install NielsNetBar — the menu bar network throughput monitor.
+# Build, run and install Nimbus Net Bar — the menu bar network throughput monitor.
 #
-#   ./build.sh              debug build → .build/debug/NielsNetBar
-#   ./build.sh run [args]   debug build as dist/debug/NielsNetBar.app, (re)launch it detached.
+#   ./build.sh              debug build → .build/debug/NimbusNetBar
+#   ./build.sh run [args]   debug build as dist/debug/NimbusNetBar.app, (re)launch it detached.
 #                           args go to the app, e.g. --hz 5. Add --fg to run in the foreground
 #                           instead (logs in this terminal, Ctrl-C quits).
-#   ./build.sh stop         quit every running NielsNetBar (dev or installed)
-#   ./build.sh app          release build → dist/NielsNetBar.app (ad-hoc signed, icon baked in)
-#   ./build.sh dmg          release build → dist/NielsNetBar-<version>.dmg, the drag-to-Applications
-#                           disk image (background drawn by Sources/NielsNetBar/DMGBackground.swift)
-#   ./build.sh install      release build → /Applications/NielsNetBar.app (replacing any older
+#   ./build.sh stop         quit every running NimbusNetBar (dev or installed)
+#   ./build.sh app          release build → dist/NimbusNetBar.app (ad-hoc signed, icon baked in)
+#   ./build.sh dmg          release build → dist/NimbusNetBar-<version>.dmg, the drag-to-Applications
+#                           disk image (background drawn by Sources/NimbusNetBar/DMGBackground.swift)
+#   ./build.sh install      release build → /Applications/NimbusNetBar.app (replacing any older
 #                           copy), launch it, and register it to launch at login
-#   ./build.sh uninstall    unregister the login item, quit, delete /Applications/NielsNetBar.app
+#   ./build.sh uninstall    unregister the login item, quit, delete /Applications/NimbusNetBar.app
 #                           and the saved preferences
 #   ./build.sh status       running? installed? login item?
-#   ./build.sh icon         re-render docs/icon.png from Sources/NielsNetBar/AppIcon.swift
+#   ./build.sh icon         re-render docs/icon.png from Sources/NimbusNetBar/AppIcon.swift
 #   ./build.sh clean        remove build products
 #
 # Signing: release bundles (app / dmg / install) are ad-hoc signed unless a Developer ID is
@@ -22,18 +22,19 @@
 # disk image is notarized and stapled. Configure it in a git-ignored ./.signing file (or the
 # environment):
 #   SIGN_IDENTITY="Developer ID Application: Niels Joubert (TEAMID)"
-#   NOTARY_PROFILE=NielsNetBar     # xcrun notarytool store-credentials NielsNetBar ...
+#   NOTARY_PROFILE=<profile>       # the name given to: xcrun notarytool store-credentials <profile> ...
 # Debug builds (run) stay ad-hoc.
 set -euo pipefail
 cd "$(dirname "$0")"
 
-NAME=NielsNetBar
-BUNDLE_ID=com.njoubert.nielsnetbar
+NAME=NimbusNetBar          # executable / target / process name
+APP_NAME="Nimbus Net Bar"  # what the user sees: the .app, the volume, Login Items
+BUNDLE_ID=com.njoubert.nimbusnetbar
 VERSION=1.1
 INSTALL_DIR=/Applications
-INSTALLED="$INSTALL_DIR/$NAME.app"
-DEV_APP="dist/debug/$NAME.app"
-REL_APP="dist/$NAME.app"
+INSTALLED="$INSTALL_DIR/$APP_NAME.app"
+DEV_APP="dist/debug/$APP_NAME.app"
+REL_APP="dist/$APP_NAME.app"
 DMG="dist/$NAME-$VERSION.dmg"
 
 # Developer ID signing / notarization, off unless configured (see the header).
@@ -70,8 +71,8 @@ make_bundle() {
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0"><dict>
-  <key>CFBundleName</key><string>$NAME</string>
-  <key>CFBundleDisplayName</key><string>$NAME</string>
+  <key>CFBundleName</key><string>$APP_NAME</string>
+  <key>CFBundleDisplayName</key><string>$APP_NAME</string>
   <key>CFBundleIdentifier</key><string>$BUNDLE_ID</string>
   <key>CFBundleExecutable</key><string>$NAME</string>
   <key>CFBundleIconFile</key><string>AppIcon</string>
@@ -83,9 +84,9 @@ make_bundle() {
   <key>NSHighResolutionCapable</key><true/>
   <key>NSPrincipalClass</key><string>NSApplication</string>
   <key>NSLocationWhenInUseUsageDescription</key>
-  <string>macOS only reveals the name of the Wi-Fi network (SSID) to apps with Location access. NielsNetBar uses it for nothing else and never reads your location.</string>
+  <string>macOS only reveals the name of the Wi-Fi network (SSID) to apps with Location access. Nimbus Net Bar uses it for nothing else and never reads your location.</string>
   <key>NSLocationUsageDescription</key>
-  <string>macOS only reveals the name of the Wi-Fi network (SSID) to apps with Location access. NielsNetBar uses it for nothing else and never reads your location.</string>
+  <string>macOS only reveals the name of the Wi-Fi network (SSID) to apps with Location access. Nimbus Net Bar uses it for nothing else and never reads your location.</string>
 </dict></plist>
 PLIST
   plutil -convert xml1 -o /dev/null "$app/Contents/Info.plist"   # validate (plutil -lint misparses here)
@@ -126,7 +127,7 @@ notarize_app() {
   rm -f "$zip"
 }
 
-# Wrap dist/NielsNetBar.app in the usual drag-to-Applications disk image: the app, an
+# Wrap dist/NimbusNetBar.app in the usual drag-to-Applications disk image: the app, an
 # Applications alias, and a background picture that says what to do and what to expect.
 # Finder keeps icon positions / background / window size in the volume's .DS_Store, and the
 # only supported way to write that is to ask Finder — hence the AppleScript (the first run
@@ -134,11 +135,11 @@ notarize_app() {
 #   make_dmg <app> <out.dmg>
 make_dmg() {
   local app=$1 out=$2 bin="$1/Contents/MacOS/$NAME"
-  local staging="dist/dmg-staging" rw="dist/$NAME-rw.dmg" vol="/Volumes/$NAME"
+  local staging="dist/dmg-staging" rw="dist/$NAME-rw.dmg" vol="/Volumes/$APP_NAME"
 
   rm -rf "$staging" "$rw"
   mkdir -p "$staging/.background"
-  ditto "$app" "$staging/$NAME.app"
+  ditto "$app" "$staging/$APP_NAME.app"
   ln -s /Applications "$staging/Applications"
   cp LICENSE "$staging/.LICENSE"    # hidden: present, but not a third icon to drag
   local bgflags=()
@@ -151,7 +152,7 @@ make_dmg() {
 
   # A stale mount from an earlier run would make this one land on "/Volumes/$NAME 1".
   if [ -d "$vol" ]; then hdiutil detach "$vol" -quiet -force || true; fi
-  hdiutil create -volname "$NAME" -srcfolder "$staging" -ov -format UDRW -fs HFS+ -quiet "$rw"
+  hdiutil create -volname "$APP_NAME" -srcfolder "$staging" -ov -format UDRW -fs HFS+ -quiet "$rw"
   local dev
   dev=$(hdiutil attach -readwrite -noverify -noautoopen "$rw" | awk '/^\/dev\// {print $1; exit}')
   [ -d "$vol" ] || { warn "mount failed"; hdiutil detach "$dev" -quiet || true; return 1; }
@@ -159,7 +160,7 @@ make_dmg() {
   # Geometry matches DMGBackground.swift: 640×440 window, icon centres at (170,210) / (470,210).
   osascript >/dev/null <<APPLESCRIPT
 tell application "Finder"
-  tell disk "$NAME"
+  tell disk "$APP_NAME"
     open
     set current view of container window to icon view
     set toolbar visible of container window to false
@@ -175,7 +176,7 @@ tell application "Finder"
     set text size of opts to 12
     set label position of opts to bottom
     set background picture of opts to file ".background:background.tiff"
-    set position of item "$NAME.app" of container window to {170, 210}
+    set position of item "$APP_NAME.app" of container window to {170, 210}
     set position of item "Applications" of container window to {470, 210}
     close
     open

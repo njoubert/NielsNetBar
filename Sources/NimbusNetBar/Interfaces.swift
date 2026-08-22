@@ -103,7 +103,7 @@ enum Interfaces {
 
         // 4. Primary interface, router, DNS, service order.
         var snap = NetworkSnapshot()
-        let store = SCDynamicStoreCreate(nil, "NielsNetBar" as CFString, nil, nil)
+        let store = SCDynamicStoreCreate(nil, "NimbusNetBar" as CFString, nil, nil)
         func global(_ key: String) -> [String: Any]? {
             guard let store else { return nil }
             return SCDynamicStoreCopyValue(store, key as CFString) as? [String: Any]
@@ -250,7 +250,7 @@ enum Interfaces {
     /// itself uses to pick the primary interface).
     private static func serviceOrder() -> [String: Int] {
         var map: [String: Int] = [:]
-        guard let prefs = SCPreferencesCreate(nil, "NielsNetBar" as CFString, nil),
+        guard let prefs = SCPreferencesCreate(nil, "NimbusNetBar" as CFString, nil),
               let set = SCNetworkSetCopyCurrent(prefs),
               let order = SCNetworkSetGetServiceOrder(set) as? [String] else { return map }
         for (i, id) in order.enumerated() {

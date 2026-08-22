@@ -1,8 +1,8 @@
 <p align="center">
-  <img src="docs/icon.png" alt="NielsNetBar icon" width="128">
+  <img src="docs/icon.png" alt="Nimbus Net Bar icon" width="128">
 </p>
 
-<h1 align="center">NielsNetBar</h1>
+<h1 align="center">Nimbus Net Bar</h1>
 
 <p align="center">
   A menu bar network monitor for macOS, in Swift. Live ↑/↓ throughput in the bar; every
@@ -11,17 +11,17 @@
 </p>
 
 <p align="center">
-  <img src="docs/screenshot.png" alt="NielsNetBar: stacked upload/download rates in the menu bar, and the dropdown listing each interface with a status dot, rates, addresses, link speed, Wi-Fi details, gateway and DNS" width="434">
+  <img src="docs/screenshot.png" alt="Nimbus Net Bar: stacked upload/download rates in the menu bar, and the dropdown listing each interface with a status dot, rates, addresses, link speed, Wi-Fi details, gateway and DNS" width="434">
 </p>
 
 ```
-./build.sh run            # debug build → dist/debug/NielsNetBar.app, launch it (add --hz 5, --fg)
+./build.sh run            # debug build → dist/debug/Nimbus Net Bar.app, launch it (add --hz 5, --fg)
 ./build.sh stop           # quit it
-./build.sh install        # release build → /Applications/NielsNetBar.app, launch, add to Login Items
+./build.sh install        # release build → /Applications/Nimbus Net Bar.app, launch, add to Login Items
 ./build.sh uninstall      # remove the Login Item, the app, and its preferences
 ./build.sh status         # running? installed? login item?
-./build.sh app            # release build → dist/NielsNetBar.app only
-./build.sh dmg            # release build → dist/NielsNetBar-<version>.dmg, drag-to-Applications disk image
+./build.sh app            # release build → dist/Nimbus Net Bar.app only
+./build.sh dmg            # release build → dist/NimbusNetBar-<version>.dmg, drag-to-Applications disk image
 ./build.sh icon           # re-render docs/icon.png
 ```
 
@@ -41,7 +41,7 @@ runtime, timestamped), notarize the app and the disk image, and staple both:
 
 ```
 SIGN_IDENTITY="Developer ID Application: Niels Joubert (TEAMID)"
-NOTARY_PROFILE=NielsNetBar   # from: xcrun notarytool store-credentials NielsNetBar --apple-id … --team-id … --password …
+NOTARY_PROFILE=<profile>      # the name you gave: xcrun notarytool store-credentials <profile> --apple-id … --team-id … --password …
 ```
 
 ## What it shows
@@ -92,7 +92,7 @@ Loopback, AirDrop's `awdl`/`llw`, bridges and the like are never shown.
 
 ## How it works
 
-* `Sources/NielsNetBar/NetworkMonitor.swift` — byte counters from `sysctl(NET_RT_IFLIST2)`,
+* `Sources/NimbusNetBar/NetworkMonitor.swift` — byte counters from `sysctl(NET_RT_IFLIST2)`,
   one `if_msghdr2` per interface with 64-bit `ifi_ibytes`/`ifi_obytes`, the name from the
   `sockaddr_dl` that follows it in the same buffer. No subprocess, no parsing, ~40 µs per
   tick. Rates are deltas over a monotonic clock that keeps counting through sleep.
@@ -141,7 +141,7 @@ Loopback, AirDrop's `awdl`/`llw`, bridges and the like are never shown.
   reads `4294967295` on a 10 Gbps port. That is why link speed comes from the media type
   instead.
 * **Launch at Login and dev builds.** The checkbox registers whichever bundle is running. From
-  `build.sh run` that is `dist/debug/NielsNetBar.app` — fine for a test, but use `install` for
+  `build.sh run` that is `dist/debug/Nimbus Net Bar.app` — fine for a test, but use `install` for
   the real thing.
 
 ## Requirements
@@ -151,6 +151,6 @@ no Xcode project). Apple Silicon or Intel.
 
 ## License
 
-NielsNetBar is free software under the [GNU General Public License, version 3 or
+Nimbus Net Bar is free software under the [GNU General Public License, version 3 or
 later](LICENSE). Use it, change it, ship it, sell it — but anything built from it has to
 be released under the same terms, with source.

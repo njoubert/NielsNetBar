@@ -1,4 +1,4 @@
-# NielsNetBar — notes for agents
+# Nimbus Net Bar — notes for agents
 
 A macOS menu bar network monitor in Swift: live ↑/↓ throughput in the bar, every
 interface's details in the dropdown. Pure SwiftPM, no dependencies, no Xcode project.
@@ -18,7 +18,7 @@ how to measure, and the traps already found.
 - **This is a long-running app.** Every change on the per-tick path (`NetworkMonitor.sample`,
   `StatusBarController.tick`/`updateBar`) is a change to something that runs twice a second
   for weeks. Measure before and after (below); the budget is well under 1 % CPU idle.
-- **It is installed and running on this machine** (`/Applications/NielsNetBar.app`, a Login
+- **It is installed and running on this machine** (`/Applications/Nimbus Net Bar.app`, a Login
   Item). `build.sh run` and `install` quit every running copy first —
   that's by design, but say so before running them, and `./build.sh install` afterwards to
   put the real copy back.
@@ -26,7 +26,7 @@ how to measure, and the traps already found.
 ## Layout
 
 ```
-Sources/NielsNetBar/
+Sources/NimbusNetBar/
   main.swift              flag parsing, AppDelegate, first-launch Login Item registration
   NetworkMonitor.swift    timer + sysctl(NET_RT_IFLIST2) counters → rates, 60 s history
   StatusBarController.swift  the status item image, the menu, live rows, visibility pause
@@ -43,7 +43,7 @@ build.sh                  build / run / stop / app / dmg / install / uninstall /
                           icon / clean — `./build.sh` with no args prints help
 docs/                     icon.png (re-rendered by `build.sh icon`) and screenshot.png (taken
                           by hand: open the menu, ⇧⌘4, space, click the menu) for the README
-dist/                     build products (gitignored): NielsNetBar.app, debug/, *.dmg
+dist/                     build products (gitignored): Nimbus Net Bar.app, debug/, *.dmg
 ```
 
 Swift 5 language mode (`swift-tools-version:5.10`) with the Swift 6 compiler; UI classes
@@ -53,13 +53,13 @@ because they already run on the main thread. Keep it that way rather than sprink
 ## Build, run, test
 
 ```
-./build.sh run [--hz 5] [--fg]   debug build as dist/debug/NielsNetBar.app (--fg: logs here)
+./build.sh run [--hz 5] [--fg]   debug build as dist/debug/Nimbus Net Bar.app (--fg: logs here)
 ./build.sh stop
 ./build.sh install               release → /Applications, launch, register Login Item
-./build.sh dmg                   release → dist/NielsNetBar-<version>.dmg
-.build/debug/NielsNetBar --print         the menu's data as text + a 1 s rate sample (no UI)
-.build/debug/NielsNetBar --dump-bar P    the status-item image → PNG
-.build/debug/NielsNetBar --dump-chart P  the chart with fake data → PNG
+./build.sh dmg                   release → dist/NimbusNetBar-<version>.dmg
+.build/debug/NimbusNetBar --print         the menu's data as text + a 1 s rate sample (no UI)
+.build/debug/NimbusNetBar --dump-bar P    the status-item image → PNG
+.build/debug/NimbusNetBar --dump-chart P  the chart with fake data → PNG
 ```
 
 There are no unit tests; `--print` is the quickest correctness check for the data path
@@ -70,7 +70,7 @@ not survive the next `run`. The installed copy keeps them.
 ## Measuring load and leaks (do this for any per-tick change)
 
 ```
-PID=$(pgrep -x NielsNetBar)
+PID=$(pgrep -x NimbusNetBar)
 ps -o etime=,time=,rss= -p $PID          # time/etime = average CPU since launch; RSS
 sample $PID 10 1 -mayDie -file s.txt     # where the time goes (read the call graph)
 leaks $PID | grep "leaks for"            # expect 0
@@ -91,16 +91,16 @@ The deliverable is the disk image. Nothing is automated beyond `build.sh dmg`; a
    `git rev-list --count HEAD`, so it increments by itself — commit before building.
 2. **Docs.** If the icon changed, `./build.sh icon`; if the menu changed, retake
    `docs/screenshot.png` by hand. Keep README's "What it shows" honest.
-3. **Build and check.** `./build.sh dmg` → `dist/NielsNetBar-<VERSION>.dmg`. Then
+3. **Build and check.** `./build.sh dmg` → `dist/NimbusNetBar-<VERSION>.dmg`. Then
    `open` it and look: 640-wide window, no blank strip, icon shadow not boxed, footer line
    visible, nothing selected. Drag-install it somewhere (or `ditto` the app out of it) and
    confirm first launch from `/Applications` registers the Login Item and prompts for
    Location. Measure (`ps`/`leaks` above) on the release build, not the debug one.
 4. **Tag and publish** (`gh` is logged in as njoubert):
    ```
-   git tag -a v<VERSION> -m "NielsNetBar <VERSION>"
+   git tag -a v<VERSION> -m "NimbusNetBar <VERSION>"
    git push origin main --tags
-   gh release create v<VERSION> dist/NielsNetBar-<VERSION>.dmg --title "NielsNetBar <VERSION>" --notes-file <notes>
+   gh release create v<VERSION> dist/NimbusNetBar-<VERSION>.dmg --title "NimbusNetBar <VERSION>" --notes-file <notes>
    ```
    Release notes: what changed for a user, in a few lines, plus the standing caveat that
    the build is unsigned (and how to allow it). Don't commit `dist/`.

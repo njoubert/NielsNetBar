@@ -40,7 +40,7 @@ final class StatusBarController: NSObject, NSMenuDelegate {
         menu.delegate = self
         menu.autoenablesItems = false
         item.menu = menu
-        item.button?.toolTip = "NielsNetBar — network throughput"
+        item.button?.toolTip = "Nimbus Net Bar — network throughput"
         chart.history = { [weak self] in self?.monitor.history ?? [] }
         monitor.onTick = { [weak self] in self?.tick() }
         PublicIP.shared.onChange = { [weak self] in self?.updatePublicIPRows() }
@@ -196,7 +196,7 @@ final class StatusBarController: NSObject, NSMenuDelegate {
         totals.target = self
         totals.attributedTitle = totalsTitle()
         totals.representedObject = "↓ \(Format.bytes(monitor.sinceLaunchIn)) ↑ \(Format.bytes(monitor.sinceLaunchOut))"
-        totals.toolTip = "Bytes moved over the physical interfaces since NielsNetBar started. Click to copy."
+        totals.toolTip = "Bytes moved over the physical interfaces since Nimbus Net Bar started. Click to copy."
         menu.addItem(totals)
         totalsRow = totals
         let v4 = NSMenuItem(), v6 = NSMenuItem()
@@ -246,7 +246,7 @@ final class StatusBarController: NSObject, NSMenuDelegate {
         menu.addItem(settings)
         menu.addItem(.separator())
 
-        let quit = NSMenuItem(title: "Quit NielsNetBar", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
+        let quit = NSMenuItem(title: "Quit Nimbus Net Bar", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
         menu.addItem(quit)
     }
 

@@ -2,15 +2,15 @@
 import PackageDescription
 
 let package = Package(
-    name: "NielsNetBar",
+    name: "NimbusNetBar",
     platforms: [.macOS("15.0")],
     products: [
-        .executable(name: "NielsNetBar", targets: ["NielsNetBar"]),
+        .executable(name: "NimbusNetBar", targets: ["NimbusNetBar"]),
     ],
     targets: [
-        // The whole menu bar app. build.sh wraps the binary into NielsNetBar.app.
+        // The whole menu bar app. build.sh wraps the binary into NimbusNetBar.app.
         .executableTarget(
-            name: "NielsNetBar",
+            name: "NimbusNetBar",
             linkerSettings: [
                 .linkedFramework("AppKit"),
                 .linkedFramework("CoreWLAN"),

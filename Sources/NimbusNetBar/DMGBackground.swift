@@ -32,7 +32,7 @@ enum DMGBackground {
         NSRect(x: 0, y: 0, width: w, height: h).fill()
 
         // Title and instruction.
-        centered("NielsNetBar", font: .systemFont(ofSize: 22, weight: .semibold), color: ink, y: h - 52)
+        centered("Nimbus Net Bar", font: .systemFont(ofSize: 22, weight: .semibold), color: ink, y: h - 52)
         centered("Drag the app onto the Applications folder, then open it from there.",
                  font: .systemFont(ofSize: 13), color: dim, y: h - 76)
 

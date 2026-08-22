@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import AppKit
 
-// NielsNetBar — a menu bar network throughput monitor. See README.md.
+// Nimbus Net Bar — a menu bar network throughput monitor. See README.md.
 //
 // Flags (all optional; build.sh uses most of them):
 //   --hz N                  sample rate for this run (default: saved setting, else 2)
@@ -25,7 +25,7 @@ struct Options {
 
 func usage() -> Never {
     print("""
-    usage: NielsNetBar [--hz N] [--enable-login-item | --disable-login-item | --login-item-status]
+    usage: NimbusNetBar [--hz N] [--enable-login-item | --disable-login-item | --login-item-status]
                     [--render-icon PATH [--size PX]] [--render-iconset DIR]
     """)
     exit(2)
