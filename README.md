@@ -31,10 +31,19 @@ Re-running `install` replaces whatever is in `/Applications` with the current bu
 To hand it to someone else, `./build.sh dmg` makes the usual disk image: the app, an
 Applications folder to drag it onto, and a background that says what to expect — the
 first launch from `/Applications` registers the Login Item (once; turning it off later
-sticks) and asks for Location access for the SSID. The build is ad-hoc signed, not
-notarized, so a copy that arrives with a quarantine flag (browser download, AirDrop)
-is refused at first open and has to be allowed in System Settings › Privacy & Security
-("Open Anyway"); a copy that comes over scp or a USB stick opens straight away.
+sticks) and asks for Location access for the SSID.
+
+Without a Developer ID the build is ad-hoc signed and not notarized, so a copy that
+arrives with a quarantine flag (browser download, AirDrop) is refused at first open and
+has to be allowed in System Settings › Privacy & Security ("Open Anyway"); a copy that
+comes over scp or a USB stick opens straight away. With one, put it in a git-ignored
+`.signing` file next to `build.sh` and `app`/`dmg`/`install` sign with it (hardened
+runtime, timestamped), notarize the app and the disk image, and staple both:
+
+```
+SIGN_IDENTITY="Developer ID Application: Niels Joubert (TEAMID)"
+NOTARY_PROFILE=NielsNetBar   # from: xcrun notarytool store-credentials NielsNetBar --apple-id … --team-id … --password …
+```
 
 ## What it shows
 

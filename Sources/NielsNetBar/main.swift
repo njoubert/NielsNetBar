@@ -11,7 +11,8 @@ import AppKit
 //   --login-item-status     print the Login Item state and exit
 //   --render-icon PATH [--size PX]   write the app icon as a PNG and exit
 //   --render-iconset DIR    write an .iconset (for iconutil) and exit
-//   --render-dmg-background DIR   write the disk image's background PNGs (1× and 2×) and exit
+//   --render-dmg-background DIR [--signed]   write the disk image's background PNGs (1× and 2×)
+//                           and exit; --signed omits the "unsigned build" footer
 //   --screenshot PATH       open the menu, capture it to PATH, quit (for the README)
 //   --dump-bar PATH         render just the status item to PATH, quit (layout check)
 //   --dump-chart PATH       render the history chart with fake data to PATH, quit
@@ -37,6 +38,7 @@ var renderIconPath: String?
 var renderIconSize = 1024
 var renderIconsetDir: String?
 var renderDMGBackgroundDir: String?
+var dmgSigned = false
 
 var args = Array(CommandLine.arguments.dropFirst())
 func takeValue(_ flag: String) -> String {
@@ -61,6 +63,7 @@ while !args.isEmpty {
     case "--size": renderIconSize = Int(takeValue(a)) ?? 1024
     case "--render-iconset": renderIconsetDir = takeValue(a)
     case "--render-dmg-background": renderDMGBackgroundDir = takeValue(a)
+    case "--signed": dmgSigned = true
     case "--screenshot": options.screenshotPath = takeValue(a)
     case "--dump-bar": options.dumpBarPath = takeValue(a)
     case "--dump-chart":
@@ -123,7 +126,7 @@ if let dir = renderIconsetDir {
     exit(0)
 }
 if let dir = renderDMGBackgroundDir {
-    do { try DMGBackground.write(to: dir); print("wrote \(dir)") }
+    do { try DMGBackground.write(to: dir, signed: dmgSigned); print("wrote \(dir)") }
     catch { fputs("dmg background: \(error)\n", stderr); exit(1) }
     exit(0)
 }

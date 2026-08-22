@@ -17,6 +17,14 @@
 #   ./build.sh icon         re-render docs/icon.png from Sources/NielsNetBar/AppIcon.swift
 #   ./build.sh screenshot   re-render docs/screenshot.png (opens the menu, captures it)
 #   ./build.sh clean        remove build products
+#
+# Signing: release bundles (app / dmg / install) are ad-hoc signed unless a Developer ID is
+# configured, in which case they are signed with it, hardened-runtime, timestamped, and the
+# disk image is notarized and stapled. Configure it in a git-ignored ./.signing file (or the
+# environment):
+#   SIGN_IDENTITY="Developer ID Application: Niels Joubert (TEAMID)"
+#   NOTARY_PROFILE=NielsNetBar     # xcrun notarytool store-credentials NielsNetBar ...
+# Debug builds (run / screenshot) stay ad-hoc.
 set -euo pipefail
 cd "$(dirname "$0")"
 
@@ -28,6 +36,14 @@ INSTALLED="$INSTALL_DIR/$NAME.app"
 DEV_APP="dist/debug/$NAME.app"
 REL_APP="dist/$NAME.app"
 DMG="dist/$NAME-$VERSION.dmg"
+
+# Developer ID signing / notarization, off unless configured (see the header).
+SIGN_IDENTITY="${SIGN_IDENTITY:-}"
+NOTARY_PROFILE="${NOTARY_PROFILE:-}"
+if [ -f .signing ]; then
+  # shellcheck source=/dev/null
+  . ./.signing
+fi
 
 # --- helpers -----------------------------------------------------------------------------
 
@@ -74,8 +90,41 @@ make_bundle() {
 </dict></plist>
 PLIST
   plutil -convert xml1 -o /dev/null "$app/Contents/Info.plist"   # validate (plutil -lint misparses here)
-  codesign --force --sign - --identifier "$BUNDLE_ID" "$app" >/dev/null 2>&1 || warn "codesign failed (continuing unsigned)"
-  note "bundled $app"
+  if [ "$config" = release ] && [ -n "$SIGN_IDENTITY" ]; then
+    # Hardened runtime + secure timestamp are what notarization requires. No entitlements:
+    # CoreLocation, CoreWLAN and ScreenCaptureKit all work under the hardened runtime.
+    codesign --force --sign "$SIGN_IDENTITY" --options runtime --timestamp --identifier "$BUNDLE_ID" "$app"
+    codesign --verify --strict --deep "$app"
+    note "bundled $app  (signed: $SIGN_IDENTITY)"
+  else
+    codesign --force --sign - --identifier "$BUNDLE_ID" "$app" >/dev/null 2>&1 || warn "codesign failed (continuing unsigned)"
+    note "bundled $app  (ad-hoc signed)"
+  fi
+}
+
+# Send something to Apple's notary service and staple the ticket to it.
+#   notarize <path to .zip/.dmg to submit> <path to staple (the .app or the .dmg)>
+notarize() {
+  local submit=$1 staple=$2
+  say "notarizing $(basename "$submit") — this waits on Apple, usually a few minutes"
+  if ! xcrun notarytool submit "$submit" --keychain-profile "$NOTARY_PROFILE" --wait; then
+    warn "notarization failed; for the reason run:"
+    warn "  xcrun notarytool log <submission id> --keychain-profile $NOTARY_PROFILE"
+    return 1
+  fi
+  xcrun stapler staple -q "$staple"
+  note "stapled $staple"
+}
+
+# Notarize the release app itself (so a copy dragged out of the DMG verifies offline too),
+# then the DMG is signed, notarized and stapled in make_dmg.
+notarize_app() {
+  local app=$1 zip="dist/$NAME-notarize.zip"
+  [ -n "$NOTARY_PROFILE" ] || { warn "no NOTARY_PROFILE: app signed but not notarized"; return 0; }
+  rm -f "$zip"
+  ditto -c -k --keepParent "$app" "$zip"
+  notarize "$zip" "$app"
+  rm -f "$zip"
 }
 
 # Wrap dist/NielsNetBar.app in the usual drag-to-Applications disk image: the app, an
@@ -93,7 +142,9 @@ make_dmg() {
   ditto "$app" "$staging/$NAME.app"
   ln -s /Applications "$staging/Applications"
   cp LICENSE "$staging/.LICENSE"    # hidden: present, but not a third icon to drag
-  "$bin" --render-dmg-background "$staging/.background" >/dev/null
+  local bgflags=()
+  [ -n "$SIGN_IDENTITY" ] && bgflags+=(--signed)   # drops the "unsigned build" footer
+  "$bin" --render-dmg-background "$staging/.background" "${bgflags[@]+"${bgflags[@]}"}" >/dev/null
   # One TIFF holding the 1× and 2× renders, so Finder picks the sharp one on Retina.
   tiffutil -cathidpicheck "$staging/.background/background.png" "$staging/.background/background@2x.png" \
     -out "$staging/.background/background.tiff" >/dev/null 2>&1
@@ -144,7 +195,15 @@ APPLESCRIPT
   rm -f "$out"
   hdiutil convert "$rw" -format UDZO -imagekey zlib-level=9 -quiet -o "$out"
   rm -rf "$rw" "$staging"
-  codesign --force --sign - "$out" >/dev/null 2>&1 || true
+  if [ -n "$SIGN_IDENTITY" ]; then
+    codesign --force --sign "$SIGN_IDENTITY" --timestamp "$out"
+    if [ -n "$NOTARY_PROFILE" ]; then
+      notarize "$out" "$out"
+      spctl -a -t open --context context:primary-signature -v "$out" 2>&1 | sed 's/^/  /' || true
+    fi
+  else
+    codesign --force --sign - "$out" >/dev/null 2>&1 || true
+  fi
   note "packed $out ($(du -h "$out" | cut -f1))"
 }
 
@@ -192,12 +251,14 @@ case "$cmd" in
   app)
     swift build -c release
     make_bundle release "$REL_APP"
+    [ -n "$SIGN_IDENTITY" ] && notarize_app "$REL_APP"
     say "built $REL_APP"
     ;;
 
   dmg)
     swift build -c release
     make_bundle release "$REL_APP"
+    [ -n "$SIGN_IDENTITY" ] && notarize_app "$REL_APP"
     make_dmg "$REL_APP" "$DMG"
     say "built $DMG"
     note "Test it: open $DMG"
@@ -206,6 +267,7 @@ case "$cmd" in
   install)
     swift build -c release
     make_bundle release "$REL_APP"
+    [ -n "$SIGN_IDENTITY" ] && notarize_app "$REL_APP"
     stop_all
     if [ -e "$INSTALLED" ]; then
       note "replacing $INSTALLED"
@@ -243,6 +305,10 @@ case "$cmd" in
     fi
     if [ -e "$INSTALLED" ]; then
       say "installed: $INSTALLED (v$(defaults read "$INSTALLED/Contents/Info" CFBundleShortVersionString 2>/dev/null || echo '?'))"
+      sig=$(codesign -dv "$INSTALLED" 2>&1 || true)
+      auth=$(printf '%s\n' "$sig" | grep -m1 '^Authority=' | cut -d= -f2- || true)
+      gate=$(spctl -a -t exec -v "$INSTALLED" 2>&1 || true)   # "source=Notarized Developer ID" when stapled/notarized
+      note "signed by: ${auth:-ad-hoc (no identity)}  ·  Gatekeeper: ${gate#*: }"
       note "login item: $("$INSTALLED/Contents/MacOS/$NAME" --login-item-status)"
     else
       note "not installed in $INSTALL_DIR"

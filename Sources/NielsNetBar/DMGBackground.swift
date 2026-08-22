@@ -24,8 +24,9 @@ enum DMGBackground {
     private static let paper = NSColor(srgbRed: 0.965, green: 0.965, blue: 0.975, alpha: 1)
     private static let arrow = NSColor(srgbRed: 0.23, green: 0.66, blue: 1.0, alpha: 1)
 
-    /// Draw in a non-flipped (y up) context of `width`×`height` points.
-    static func draw() {
+    /// Draw in a non-flipped (y up) context of `width`×`height` points. `signed` drops the
+    /// "unsigned build" footer (build.sh passes it when a Developer ID is configured).
+    static func draw(signed: Bool) {
         let w = width, h = height
         paper.setFill()
         NSRect(x: 0, y: 0, width: w, height: h).fill()
@@ -58,9 +59,11 @@ enum DMGBackground {
         for (head, body) in notes {
             top = paragraph(head: head, body: body, top: top) - 10
         }
-        centered("Unsigned build \u{2014} if macOS refuses to open it, allow it under "
-                 + "System Settings › Privacy & Security (\u{201C}Open Anyway\u{201D}).",
-                 font: .systemFont(ofSize: 10.5), color: faint, y: 18)
+        if !signed {
+            centered("Unsigned build \u{2014} if macOS refuses to open it, allow it under "
+                     + "System Settings › Privacy & Security (\u{201C}Open Anyway\u{201D}).",
+                     font: .systemFont(ofSize: 10.5), color: faint, y: 18)
+        }
     }
 
     private static func centered(_ s: String, font: NSFont, color: NSColor, y: CGFloat) {
@@ -88,7 +91,7 @@ enum DMGBackground {
 
     // MARK: Rasterising
 
-    static func pngData(scale: Int) -> Data? {
+    static func pngData(scale: Int, signed: Bool) -> Data? {
         let px = (Int(width) * scale, Int(height) * scale)
         guard let ctx = CGContext(data: nil, width: px.0, height: px.1, bitsPerComponent: 8, bytesPerRow: 0,
                                   space: CGColorSpace(name: CGColorSpace.sRGB)!,
@@ -97,7 +100,7 @@ enum DMGBackground {
         let gc = NSGraphicsContext(cgContext: ctx, flipped: false)
         NSGraphicsContext.saveGraphicsState()
         NSGraphicsContext.current = gc
-        draw()
+        draw(signed: signed)
         NSGraphicsContext.restoreGraphicsState()
         guard let cg = ctx.makeImage() else { return nil }
         let rep = NSBitmapImageRep(cgImage: cg)
@@ -107,10 +110,10 @@ enum DMGBackground {
     }
 
     /// Write `background.png` and `background@2x.png` into `dir` (build.sh packs them).
-    static func write(to dir: String) throws {
+    static func write(to dir: String, signed: Bool) throws {
         try FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
         for (scale, name) in [(1, "background.png"), (2, "background@2x.png")] {
-            guard let data = pngData(scale: scale) else { throw CocoaError(.fileWriteUnknown) }
+            guard let data = pngData(scale: scale, signed: signed) else { throw CocoaError(.fileWriteUnknown) }
             try data.write(to: URL(fileURLWithPath: dir).appendingPathComponent(name))
         }
     }
