@@ -67,6 +67,36 @@ There are no unit tests; `--print` is the quickest correctness check for the dat
 each rebuild as a new app: Location permission granted to a dev build does
 not survive the next `run`. The installed copy keeps them.
 
+## Inspecting the menu (there is no screenshot helper any more)
+
+Drive the real app through the accessibility API — it reads the live menu, so it verifies
+what the user actually sees, and it can click rows:
+
+```
+osascript -e 'tell application "System Events" to tell process "NimbusNetBar"
+  click menu bar item 1 of menu bar 1        -- accessory app: there is only menu bar 1
+  delay 1.5
+  set m to menu 1 of menu bar item 1 of menu bar 1
+  set sz to size of m                        -- {width, height}; read item 1 of sz, do not
+  ...                                        -- coerce it inline or AppleScript errors
+  get name of menu item i of m               -- multi-line rows come back with the \n
+  key code 53                                -- escape, to close
+end tell'
+```
+
+Needs Accessibility permission for whatever runs it (the terminal / the IDE). System Settings
+panes can be walked the same way (`entire contents of window 1`, then match `AXCheckBox` /
+`AXSwitch` by name) to read or flip a privacy switch. Careful: the Location dialog's button is
+`Don’t Allow` with a **curly** apostrophe — matching `"Don't Allow"` silently fails.
+
+**Testing first-launch behaviour with throwaway bundle ids**: copy the built .app, change
+`CFBundleIdentifier`, re-sign ad-hoc, and macOS treats it as a brand-new app (Location state
+"not determined" again). Keep the copy **outside `/Applications`** — from inside it, the app
+registers itself as a Login Item, and deleting the bundle then leaves a ghost entry that can
+only be cleared by recreating the bundle and running `--disable-login-item`. Pre-seed state
+with `defaults write <probe id> <key>` to reach a specific case without any dialogs. A
+CoreLocation dialog **survives the requesting app being killed**, so dismiss it explicitly.
+
 ## Measuring load and leaks (do this for any per-tick change)
 
 ```
@@ -88,7 +118,9 @@ The deliverable is the disk image. Nothing is automated beyond `build.sh dmg`; a
 
 1. **Version.** `VERSION=` near the top of `build.sh` is the marketing version
    (`CFBundleShortVersionString`, the DMG's file name). `CFBundleVersion` is
-   `git rev-list --count HEAD`, so it increments by itself — commit before building.
+   `git rev-list --count HEAD`, so it increments by itself — commit before building. It
+   cannot be a git hash: macOS requires one to three period-separated integers and *orders*
+   versions by it. The menu's version row shows `v<short> (<build>)`.
 2. **Docs.** If the icon changed, `./build.sh icon`; if the menu changed, retake
    `docs/screenshot.png` by hand. Keep README's "What it shows" honest.
 3. **Build and check.** `./build.sh dmg` → `dist/NimbusNetBar-<VERSION>.dmg`. Then
@@ -96,11 +128,16 @@ The deliverable is the disk image. Nothing is automated beyond `build.sh dmg`; a
    visible, nothing selected. Drag-install it somewhere (or `ditto` the app out of it) and
    confirm first launch from `/Applications` registers the Login Item and prompts for
    Location. Measure (`ps`/`leaks` above) on the release build, not the debug one.
-4. **Tag and publish** (`gh` is logged in as njoubert):
+4. **Installing what you just built:** mount the notarized DMG and `ditto` the app out of it
+   to `/Applications` rather than `./build.sh install` — install re-signs the bundle, which
+   invalidates the staple and costs another full notarization round, and the DMG copy is the
+   exact artifact users get. Quit the running copy first; the Login Item registration points
+   at the path, so replacing the bundle in place keeps it.
+5. **Tag and publish** (`gh` is logged in as njoubert):
    ```
-   git tag -a v<VERSION> -m "NimbusNetBar <VERSION>"
+   git tag -a v<VERSION> -m "Nimbus Net Bar <VERSION>"
    git push origin main --tags
-   gh release create v<VERSION> dist/NimbusNetBar-<VERSION>.dmg --title "NimbusNetBar <VERSION>" --notes-file <notes>
+   gh release create v<VERSION> dist/NimbusNetBar-<VERSION>.dmg --title "Nimbus Net Bar <VERSION>" --notes-file <notes>
    ```
    Release notes: what changed for a user, in a few lines, plus the standing caveat that
    the build is unsigned (and how to allow it). Don't commit `dist/`.
@@ -170,5 +207,23 @@ A Homebrew cask is possible once releases are stable (fixed download URL + the D
 - **Unsigned build.** Ad-hoc signed, not notarized: a quarantined DMG (browser, AirDrop) is
   refused until allowed in System Settings › Privacy & Security ("Open Anyway"); on macOS 15
   right-click › Open no longer works. Notarizing needs an Apple Developer ID.
+- **The macOS Location prompt is one-shot.** `requestWhenInUseAuthorization()` raises the
+  dialog only on the *first* call an app (bundle id) ever makes; every later call is a silent
+  no-op. So any "click to allow" affordance must check whether the prompt is still available
+  (the `locationRequested` default) and otherwise open Privacy settings — otherwise the click
+  does nothing at all. Adding a well-meaning extra auto-request *consumes* that one prompt and
+  breaks the manual path; that is exactly how the SSID row got broken once already.
+- **Only `/Applications` copies auto-ask for Location** (`isInstalledCopy`), so a dev build
+  deliberately never prompts on launch — if you are testing "why didn't it ask me", check
+  which copy is running before assuming the code is wrong.
+- **Running the binary from a shell is not a valid TCC test.** `…/Contents/MacOS/NimbusNetBar
+  --print` shows the SSID as hidden even when the installed .app is authorized, because TCC
+  attributes the request to the *responsible* process (your terminal), not the bundle. Test
+  permissions through the real .app, launched with `open`.
+- **The menu could only ever get wider.** `ChartView` has `autoresizingMask = [.width]`, so
+  AppKit stretches it to the menu width; the same instance is reused on every open, so that
+  stretched frame became the menu's new minimum (measured: 633 pt → 649 pt on the next open).
+  `rebuild()` resets it to `chartWidth` first. Any long row therefore widens the menu
+  permanently — keep notices to two short lines rather than one long one.
 - **Interfaces that count toward the bar total** are `en*`, `ppp*`, `pdp_ip*` only; tunnels
   are excluded on purpose (their bytes are re-sent over a physical port — double counting).
