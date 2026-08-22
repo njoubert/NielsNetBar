@@ -258,6 +258,18 @@ final class StatusBarController: NSObject, NSMenuDelegate {
         menu.addItem(settings)
         menu.addItem(.separator())
 
+        // Version, dim and small, just above Quit. Click to copy — the first thing a bug
+        // report needs. Falls back to "dev build" when running the bare binary (no bundle).
+        let versionText = StatusBarController.versionString()
+        let version = NSMenuItem(title: versionText, action: #selector(copyValue(_:)), keyEquivalent: "")
+        version.target = self
+        version.representedObject = versionText
+        version.toolTip = "Click to copy"
+        version.attributedTitle = NSAttributedString(string: versionText, attributes: [
+            .font: NSFont.menuFont(ofSize: NSFont.smallSystemFontSize),
+            .foregroundColor: NSColor.secondaryLabelColor])
+        menu.addItem(version)
+
         let quit = NSMenuItem(title: "Quit Nimbus Net Bar", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
         menu.addItem(quit)
     }
@@ -485,6 +497,16 @@ final class StatusBarController: NSObject, NSMenuDelegate {
             let (v, c) = text(PublicIP.shared.ipv6)
             setRow(r, label: "Public IPv6", value: v == "unavailable" ? "none" : v, copy: c, toolTip: tip)
         }
+    }
+
+    /// "Nimbus Net Bar 1.2 (21)" — marketing version plus the build number, which is the
+    /// commit count, so a report pins down the exact source it came from.
+    private static func versionString() -> String {
+        let info = Bundle.main.infoDictionary
+        let name = info?["CFBundleName"] as? String ?? "Nimbus Net Bar"
+        guard let short = info?["CFBundleShortVersionString"] as? String else { return "\(name) — dev build" }
+        let build = info?["CFBundleVersion"] as? String
+        return build.map { "\(name) \(short) (\($0))" } ?? "\(name) \(short)"
     }
 
     private static func dotImage(_ dot: Dot) -> NSImage {
