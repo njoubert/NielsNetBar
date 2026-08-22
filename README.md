@@ -23,7 +23,6 @@
 ./build.sh app            # release build → dist/NielsNetBar.app only
 ./build.sh dmg            # release build → dist/NielsNetBar-1.0.dmg, drag-to-Applications disk image
 ./build.sh icon           # re-render docs/icon.png
-./build.sh screenshot     # re-render docs/screenshot.png
 ```
 
 Re-running `install` replaces whatever is in `/Applications` with the current build.
@@ -124,7 +123,7 @@ Loopback, AirDrop's `awdl`/`llw`, bridges and the like are never shown.
   (`build.sh dmg` renders it at 1× and 2× into one TIFF and lets Finder lay out the window).
 * `main.swift` — flag parsing, the `NSApplicationDelegate`, and a few debug flags:
   `--print` (the menu's data as text), `--dump-bar PATH` (the bar image), `--dump-chart PATH`
-  (the chart with fake data), `--screenshot PATH`.
+  (the chart with fake data).
 
 ## Gotchas
 
@@ -135,7 +134,7 @@ Loopback, AirDrop's `awdl`/`llw`, bridges and the like are never shown.
   rebuild is a "new app" to macOS and would re-prompt — its SSID row says so and asks on
   click. Everything else about Wi-Fi shows without the permission.
 * **Ad-hoc signed.** No developer certificate: the bundle is signed with `-`, which is enough
-  for Login Items, Location and Screen Recording prompts to work, but each rebuild gets a new
+  for Login Items and the Location prompt to work, but each rebuild gets a new
   identity, so permissions granted to a dev build don't survive the next `run`. The installed
   copy keeps them until you `install` again.
 * **10 GbE overflows the kernel's baud-rate field** — `ifi_baudrate` is 32-bit in practice and
@@ -144,8 +143,6 @@ Loopback, AirDrop's `awdl`/`llw`, bridges and the like are never shown.
 * **Launch at Login and dev builds.** The checkbox registers whichever bundle is running. From
   `build.sh run` that is `dist/debug/NielsNetBar.app` — fine for a test, but use `install` for
   the real thing.
-* `build.sh screenshot` uses ScreenCaptureKit, which needs Screen Recording permission for
-  the (dev) app. It captures only NielsNetBar's own windows on a transparent background.
 
 ## Requirements
 

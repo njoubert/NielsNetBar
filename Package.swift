@@ -17,7 +17,6 @@ let package = Package(
                 .linkedFramework("CoreLocation"),
                 .linkedFramework("SystemConfiguration"),
                 .linkedFramework("ServiceManagement"),
-                .linkedFramework("ScreenCaptureKit"),
             ]
         ),
     ]

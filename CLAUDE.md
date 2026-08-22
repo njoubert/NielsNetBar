@@ -19,7 +19,7 @@ how to measure, and the traps already found.
   `StatusBarController.tick`/`updateBar`) is a change to something that runs twice a second
   for weeks. Measure before and after (below); the budget is well under 1 % CPU idle.
 - **It is installed and running on this machine** (`/Applications/NielsNetBar.app`, a Login
-  Item). `build.sh run`, `install`, `dmg`, `screenshot` all quit every running copy first —
+  Item). `build.sh run` and `install` quit every running copy first —
   that's by design, but say so before running them, and `./build.sh install` afterwards to
   put the real copy back.
 
@@ -39,10 +39,10 @@ Sources/NielsNetBar/
   LoginItem.swift         SMAppService wrapper + the "registered once" default
   AppIcon.swift           the icon, drawn in code → .iconset/.icns at bundle time
   DMGBackground.swift     the disk image's background, drawn in code
-  Screenshot.swift        README screenshot helper (ScreenCaptureKit)
 build.sh                  build / run / stop / app / dmg / install / uninstall / status /
-                          icon / screenshot / clean — `./build.sh` with no args prints help
-docs/                     icon.png and screenshot.png for the README (re-rendered by build.sh)
+                          icon / clean — `./build.sh` with no args prints help
+docs/                     icon.png (re-rendered by `build.sh icon`) and screenshot.png (taken
+                          by hand: open the menu, ⇧⌘4, space, click the menu) for the README
 dist/                     build products (gitignored): NielsNetBar.app, debug/, *.dmg
 ```
 
@@ -64,7 +64,7 @@ because they already run on the main thread. Keep it that way rather than sprink
 
 There are no unit tests; `--print` is the quickest correctness check for the data path
 (compare with `ifconfig` / `netstat -ib`). Dev builds are ad-hoc signed, so macOS sees
-each rebuild as a new app: Location/Screen Recording permissions granted to a dev build do
+each rebuild as a new app: Location permission granted to a dev build does
 not survive the next `run`. The installed copy keeps them.
 
 ## Measuring load and leaks (do this for any per-tick change)
@@ -89,9 +89,8 @@ The deliverable is the disk image. Nothing is automated beyond `build.sh dmg`; a
 1. **Version.** `VERSION=` near the top of `build.sh` is the marketing version
    (`CFBundleShortVersionString`, the DMG's file name). `CFBundleVersion` is
    `git rev-list --count HEAD`, so it increments by itself — commit before building.
-2. **Docs.** If the menu or the bar changed, `./build.sh screenshot` and `./build.sh icon`
-   refresh `docs/` (screenshot needs Screen Recording permission for the dev build — it
-   times out with a message if not granted). Keep README's "What it shows" honest.
+2. **Docs.** If the icon changed, `./build.sh icon`; if the menu changed, retake
+   `docs/screenshot.png` by hand. Keep README's "What it shows" honest.
 3. **Build and check.** `./build.sh dmg` → `dist/NielsNetBar-<VERSION>.dmg`. Then
    `open` it and look: 640-wide window, no blank strip, icon shadow not boxed, footer line
    visible, nothing selected. Drag-install it somewhere (or `ditto` the app out of it) and

@@ -15,7 +15,6 @@
 #                           and the saved preferences
 #   ./build.sh status       running? installed? login item?
 #   ./build.sh icon         re-render docs/icon.png from Sources/NielsNetBar/AppIcon.swift
-#   ./build.sh screenshot   re-render docs/screenshot.png (opens the menu, captures it)
 #   ./build.sh clean        remove build products
 #
 # Signing: release bundles (app / dmg / install) are ad-hoc signed unless a Developer ID is
@@ -24,7 +23,7 @@
 # environment):
 #   SIGN_IDENTITY="Developer ID Application: Niels Joubert (TEAMID)"
 #   NOTARY_PROFILE=NielsNetBar     # xcrun notarytool store-credentials NielsNetBar ...
-# Debug builds (run / screenshot) stay ad-hoc.
+# Debug builds (run) stay ad-hoc.
 set -euo pipefail
 cd "$(dirname "$0")"
 
@@ -92,7 +91,7 @@ PLIST
   plutil -convert xml1 -o /dev/null "$app/Contents/Info.plist"   # validate (plutil -lint misparses here)
   if [ "$config" = release ] && [ -n "$SIGN_IDENTITY" ]; then
     # Hardened runtime + secure timestamp are what notarization requires. No entitlements:
-    # CoreLocation, CoreWLAN and ScreenCaptureKit all work under the hardened runtime.
+    # CoreLocation and CoreWLAN work under the hardened runtime.
     codesign --force --sign "$SIGN_IDENTITY" --options runtime --timestamp --identifier "$BUNDLE_ID" "$app"
     codesign --verify --strict --deep "$app"
     note "bundled $app  (signed: $SIGN_IDENTITY)"
@@ -318,15 +317,6 @@ case "$cmd" in
   icon)
     swift build >/dev/null
     .build/debug/$NAME --render-icon docs/icon.png --size 512
-    ;;
-
-  screenshot)
-    swift build
-    make_bundle debug "$DEV_APP"
-    stop_all
-    mkdir -p docs
-    "$DEV_APP/Contents/MacOS/$NAME" --screenshot "$PWD/docs/screenshot.png" "$@"
-    say "wrote docs/screenshot.png"
     ;;
 
   clean)

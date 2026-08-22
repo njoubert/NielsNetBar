@@ -13,7 +13,6 @@ import AppKit
 //   --render-iconset DIR    write an .iconset (for iconutil) and exit
 //   --render-dmg-background DIR [--signed]   write the disk image's background PNGs (1× and 2×)
 //                           and exit; --signed omits the "unsigned build" footer
-//   --screenshot PATH       open the menu, capture it to PATH, quit (for the README)
 //   --dump-bar PATH         render just the status item to PATH, quit (layout check)
 //   --dump-chart PATH       render the history chart with fake data to PATH, quit
 //   --print                 print what the menu would show, as text, and quit
@@ -21,14 +20,13 @@ import AppKit
 struct Options {
     var hz: Double?
     var enableLoginItem = false
-    var screenshotPath: String?
     var dumpBarPath: String?
 }
 
 func usage() -> Never {
     print("""
     usage: NielsNetBar [--hz N] [--enable-login-item | --disable-login-item | --login-item-status]
-                    [--render-icon PATH [--size PX]] [--render-iconset DIR] [--screenshot PATH]
+                    [--render-icon PATH [--size PX]] [--render-iconset DIR]
     """)
     exit(2)
 }
@@ -64,7 +62,6 @@ while !args.isEmpty {
     case "--render-iconset": renderIconsetDir = takeValue(a)
     case "--render-dmg-background": renderDMGBackgroundDir = takeValue(a)
     case "--signed": dmgSigned = true
-    case "--screenshot": options.screenshotPath = takeValue(a)
     case "--dump-bar": options.dumpBarPath = takeValue(a)
     case "--dump-chart":
         // Render the history chart with synthetic data (layout check, no screen grab needed).
@@ -175,9 +172,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             LocationAccess.shared.requestIfNeeded()
         }
 
-        if let path = options.screenshotPath {
-            scheduleScreenshot(to: path)
-        }
         if let path = options.dumpBarPath {
             let t = Timer(timeInterval: 2.5, repeats: false) { [weak self] _ in
                 Task { @MainActor in
@@ -188,30 +182,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             }
             RunLoop.main.add(t, forMode: .common)
         }
-    }
-
-    /// Open the menu, wait for the public IP to land, capture our own windows, quit.
-    private func scheduleScreenshot(to path: String) {
-        let t1 = Timer(timeInterval: 1.5, repeats: false) { [weak self] _ in
-            Task { @MainActor in self?.statusBar.openMenu() }
-        }
-        RunLoop.main.add(t1, forMode: .common)
-        let t2 = Timer(timeInterval: 4.0, repeats: false) { [weak self] _ in
-            Task { @MainActor in
-                guard let self else { return }
-                let ok = await Screenshot.captureOwnWindows(to: path)
-                self.statusBar.closeMenu()
-                NSLog(ok ? "screenshot → \(path)" : "screenshot failed")
-                exit(ok ? 0 : 1)
-            }
-        }
-        RunLoop.main.add(t2, forMode: .common)
-        // ScreenCaptureKit blocks on the Screen Recording permission prompt; don't hang forever.
-        let t3 = Timer(timeInterval: 20.0, repeats: false) { _ in
-            NSLog("screenshot timed out — grant Screen Recording to NielsNetBar in System Settings › Privacy & Security, then retry")
-            exit(1)
-        }
-        RunLoop.main.add(t3, forMode: .common)
     }
 }
 

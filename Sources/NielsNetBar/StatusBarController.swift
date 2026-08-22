@@ -83,12 +83,6 @@ final class StatusBarController: NSObject, NSMenuDelegate {
         if wasHidden, hiddenReasons.isEmpty { updateBar() }   // catch up right away
     }
 
-    /// The frame of the status item on screen (for `--screenshot`).
-    var buttonScreenFrame: CGRect? {
-        guard let b = item.button, let w = b.window else { return nil }
-        return w.convertToScreen(b.convert(b.bounds, to: nil))
-    }
-
     /// Render the status button itself (for checking the two-line layout without a screen grab).
     func dumpBar(to path: String) -> Bool {
         guard let b = item.button, let rep = b.bitmapImageRepForCachingDisplay(in: b.bounds) else { return false }
@@ -96,9 +90,6 @@ final class StatusBarController: NSObject, NSMenuDelegate {
         guard let data = rep.representation(using: .png, properties: [:]) else { return false }
         return (try? data.write(to: URL(fileURLWithPath: path))) != nil
     }
-
-    func openMenu() { item.button?.performClick(nil) }
-    func closeMenu() { menu.cancelTracking() }
 
     // MARK: Bar
 
