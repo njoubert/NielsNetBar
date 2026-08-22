@@ -109,6 +109,16 @@ leaks $PID | grep "leaks for"            # expect 0
 heap $PID | head                         # node count; take two, minutes apart, for growth
 ```
 
+Two measurement traps, both hit and disproved as "bugs" in one session: (1) CPU% of two
+release builds raced side by side differs by up to ~33 % for *byte-identical* binaries
+(efficiency-core scheduling inflates CPU-seconds, and the penalty follows launch order) — so
+always race a binary against a copy of itself as a control before believing a regression.
+(2) RSS of a young process climbs ~26 → ~50 MB during its first minutes of repaint activity
+and then pins — AppKit/CoreText caches warming to a bounded plateau (~54 MB for the installed
+app), not a leak: forcing repaints every tick for 4 minutes at the plateau moves RSS by 0.1 MB
+and leaves `heap` counts flat (`NSImage` count constant at 8). Measure growth only after the
+plateau; `heap` object counts are the ground truth, RSS is not.
+
 Baselines on a Mac Studio (M-series, 32 interfaces, 2 Hz, menu closed, release build):
 **0.83 % CPU, 0 leaks, heap flat over 1000 ticks** — after the fixes below. Before them
 it was 2.7 %. `readCounters()` costs ~40 µs per call; a 500-iteration microbenchmark of a
