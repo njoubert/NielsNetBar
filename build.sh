@@ -90,14 +90,32 @@ make_bundle() {
 </dict></plist>
 PLIST
   plutil -convert xml1 -o /dev/null "$app/Contents/Info.plist"   # validate (plutil -lint misparses here)
+
+  # Entitlements. The Location one is not optional under the hardened runtime: locationd
+  # refuses to raise the prompt for a hardened client that lacks it, logging "supported the
+  # hardened runtime but doesn't have the entitlement" and dropping the request on the floor.
+  # Nothing surfaces in the app, so it just never asks and the SSID stays hidden forever.
+  # Ad-hoc builds are signed with it too, so dev and release behave the same.
+  local ents="dist/$config-$NAME.entitlements"
+  cat > "$ents" <<'ENTITLEMENTS'
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+  <key>com.apple.security.personal-information.location</key><true/>
+</dict></plist>
+ENTITLEMENTS
+  plutil -convert xml1 -o /dev/null "$ents"   # validate (plutil -lint misparses here)
+
   if [ "$config" = release ] && [ -n "$SIGN_IDENTITY" ]; then
-    # Hardened runtime + secure timestamp are what notarization requires. No entitlements:
-    # CoreLocation and CoreWLAN work under the hardened runtime.
-    codesign --force --sign "$SIGN_IDENTITY" --options runtime --timestamp --identifier "$BUNDLE_ID" "$app"
+    # Hardened runtime + secure timestamp are what notarization requires.
+    codesign --force --sign "$SIGN_IDENTITY" --options runtime --timestamp \
+      --entitlements "$ents" --identifier "$BUNDLE_ID" "$app"
     codesign --verify --strict --deep "$app"
     note "bundled $app  (signed: $SIGN_IDENTITY)"
   else
-    codesign --force --sign - --identifier "$BUNDLE_ID" "$app" >/dev/null 2>&1 || warn "codesign failed (continuing unsigned)"
+    if ! codesign --force --sign - --entitlements "$ents" --identifier "$BUNDLE_ID" "$app" >/dev/null 2>&1; then
+      warn "codesign failed (continuing unsigned)"
+    fi
     note "bundled $app  (ad-hoc signed)"
   fi
 }

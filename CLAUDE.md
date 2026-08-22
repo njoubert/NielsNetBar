@@ -208,6 +208,18 @@ A Homebrew cask is possible once releases are stable (fixed download URL + the D
 - **Unsigned build.** Ad-hoc signed, not notarized: a quarantined DMG (browser, AirDrop) is
   refused until allowed in System Settings › Privacy & Security ("Open Anyway"); on macOS 15
   right-click › Open no longer works. Notarizing needs an Apple Developer ID.
+- **A hardened-runtime build needs the Location entitlement or it can never ask.** Signing
+  release bundles with `--options runtime` (required for notarization) without
+  `com.apple.security.personal-information.location` makes `locationd` drop the request
+  silently: `Client has supported the hardened runtime but doesn't have the entitlement, not
+  sending #AuthPrompt message to #CoreLocationAgent`. Nothing surfaces in the app — it looks
+  exactly like "macOS just didn't ask". `build.sh` writes the entitlements plist next to the
+  bundle and passes `--entitlements` on both the Developer ID and the ad-hoc path. This is why
+  v1.3 never prompted on a fresh Mac. Ad-hoc dev builds are *not* hardened, so they always
+  prompted — the bug only ever showed in a signed release. Check with
+  `codesign -d --entitlements - --xml <app>` and, when a prompt goes missing,
+  `log show --predicate 'process == "locationd"' | grep <bundle id>` — locationd says exactly
+  why it refused.
 - **The macOS Location prompt is one-shot.** `requestWhenInUseAuthorization()` raises the
   dialog only on the *first* call an app (bundle id) ever makes; every later call is a silent
   no-op. So any "click to allow" affordance must check whether the prompt is still available
