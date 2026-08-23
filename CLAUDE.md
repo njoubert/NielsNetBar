@@ -194,7 +194,10 @@ path working, it's what any machine without the certificate uses. `./build.sh st
 shows who signed the installed copy and Gatekeeper's verdict. Notarization waits on Apple
 (minutes, occasionally longer); failures: `xcrun notarytool log <id> --keychain-profile …`.
 The private key is not re-downloadable from Apple: a machine can only sign if the key has
-been imported into its login keychain from a `.p12` export, and `notarytool
+been imported into its login keychain from a `.p12` export, which with this machine's login
+keychain is the only copy of the key that exists. Lose both and every installed copy
+is stranded on the release it has, because the updater refuses a download signed by anyone
+else. `notarytool
 store-credentials` has been run there. Setting up a second Mac means doing both — until then
 `security find-identity -v -p codesigning` finds nothing and builds silently fall back to
 ad-hoc. The membership is annual; if it lapses, already-notarized releases keep working
