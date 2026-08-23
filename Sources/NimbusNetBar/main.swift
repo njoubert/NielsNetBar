@@ -116,6 +116,38 @@ while !args.isEmpty {
             fputs("error: \(error)\n", stderr); exit(1)
         }
         exit(0)
+    case "--preflight":
+        // What must stay true for auto-update to keep working, checked against a built bundle.
+        // `build.sh release` runs this before it pushes anything. The version comes from the
+        // bundle being checked — this is about *that* build, not what is installed or running.
+        let preflightPath = takeValue(a)
+        let preflightPlist = URL(fileURLWithPath: preflightPath).appendingPathComponent("Contents/Info.plist")
+        let preflightInfo = (try? Data(contentsOf: preflightPlist)).flatMap {
+            try? PropertyListSerialization.propertyList(from: $0, format: nil) as? [String: Any]
+        } ?? nil
+        guard let preflightShort = preflightInfo?["CFBundleShortVersionString"] as? String,
+              let preflightVersion = SemanticVersion(preflightShort) else {
+            fputs("\(preflightPath) has no readable CFBundleShortVersionString\n", stderr)
+            exit(1)
+        }
+        let preflightSemaphore = DispatchSemaphore(value: 0)
+        nonisolated(unsafe) var preflightReport: Preflight.Report?
+        Task {
+            preflightReport = await Preflight.run(app: URL(fileURLWithPath: preflightPath),
+                                                  config: Updates.config(currentVersion: preflightVersion),
+                                                  releaseVersion: preflightVersion)
+            preflightSemaphore.signal()
+        }
+        preflightSemaphore.wait()
+        for check in preflightReport!.checks {
+            print("\(check.ok ? "ok  " : "FAIL") \(check.name): \(check.detail)")
+        }
+        if !(preflightReport!.passed) {
+            fputs("\nthis build would break auto-update for people who already have the app\n", stderr)
+            exit(1)
+        }
+        print("\npreflight passed")
+        exit(0)
     case "--print":
         // Text dump of what the menu would show, plus a one-second rate sample.
         let before = NetworkMonitor.readCounters()
