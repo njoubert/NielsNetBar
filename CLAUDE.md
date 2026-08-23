@@ -41,10 +41,12 @@ Sources/NimbusNetBar/
   LoginItem.swift         SMAppService wrapper + the "registered once" default
   AppIcon.swift           the icon, drawn in code → .iconset/.icns at bundle time
   DMGBackground.swift     the disk image's background, drawn in code
+  SocialCard.swift        GitHub's link-preview card, drawn in code from the two docs/ pictures
 build.sh                  build / run / stop / app / dmg / install / uninstall / status /
-                          icon / clean — `./build.sh` with no args prints help
+                          icon / social / clean — `./build.sh` with no args prints help
 docs/                     icon.png (re-rendered by `build.sh icon`) and screenshot.png (taken
-                          by hand: open the menu, ⇧⌘4, space, click the menu) for the README
+                          by hand: open the menu, ⇧⌘4, space, click the menu) for the README,
+                          plus social-preview.png (`build.sh social`) — see below
 dist/                     build products (gitignored): Nimbus Net Bar.app, debug/, *.dmg
 ```
 
@@ -165,7 +167,8 @@ the way in from 1.6.0; the manual steps below still describe what it does:
    cannot be a git hash: macOS requires one to three period-separated integers and *orders*
    versions by it. The menu's version row shows `v<short> (<build>)`.
 2. **Docs.** If the icon changed, `./build.sh icon`; if the menu changed, retake
-   `docs/screenshot.png` by hand. Keep README's "What it shows" honest.
+   `docs/screenshot.png` by hand. Either of those changes the link-preview card too, so
+   `./build.sh social` and re-upload it (below). Keep README's "What it shows" honest.
 3. **Build and check.** `./build.sh dmg` → `dist/NimbusNetBar-<VERSION>.dmg`. Then
    `open` it and look: 640-wide window, no blank strip, icon shadow not boxed, footer line
    visible, nothing selected. Drag-install it somewhere (or `ditto` the app out of it) and
@@ -292,5 +295,15 @@ A Homebrew cask is possible once releases are stable (fixed download URL + the D
   stretched frame became the menu's new minimum (measured: 633 pt → 649 pt on the next open).
   `rebuild()` resets it to `chartWidth` first. Any long row therefore widens the menu
   permanently — keep notices to two short lines rather than one long one.
+- **A README hero image is not the link preview.** What chat apps, Slack and Twitter show for
+  a GitHub URL is `og:image`, and that is either a picture uploaded under the repo's
+  Settings › General › Social preview or, failing that, a grey card of the repo name and the
+  contributor count. GitHub never reads the README for it. **There is no API for the upload** —
+  not REST, not GraphQL, not `gh` — so `./build.sh social` only draws the file; putting it on
+  the repo is a manual drag onto that settings page, once per repo, and again whenever the
+  icon or the screenshot changes. Apple's LinkPresentation sometimes scrapes a README image
+  when the `og:image` fetch fails, which makes a repo *look* like it has a preview it hasn't
+  got — check `curl -sL <repo> | grep og:image` instead: an `opengraph.githubassets.com` URL
+  means the generated card, `repository-images.githubusercontent.com` means a real one.
 - **Interfaces that count toward the bar total** are `en*`, `ppp*`, `pdp_ip*` only; tunnels
   are excluded on purpose (their bytes are re-sent over a physical port — double counting).

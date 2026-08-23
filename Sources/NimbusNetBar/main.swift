@@ -14,6 +14,7 @@ import NimbusUpdater
 //   --render-iconset DIR    write an .iconset (for iconutil) and exit
 //   --render-dmg-background DIR [--signed]   write the disk image's background PNGs (1× and 2×)
 //                           and exit; --signed omits the "unsigned build" footer
+//   --render-social PATH    write the GitHub social preview card (1280×640) and exit
 //   --dump-bar PATH         render just the status item to PATH, quit (layout check)
 //   --dump-chart PATH       render the history chart with fake data to PATH, quit
 //   --print                 print what the menu would show, as text, and quit
@@ -28,6 +29,7 @@ func usage() -> Never {
     print("""
     usage: NimbusNetBar [--hz N] [--enable-login-item | --disable-login-item | --login-item-status]
                     [--render-icon PATH [--size PX]] [--render-iconset DIR]
+                    [--render-social PATH]
     """)
     exit(2)
 }
@@ -37,6 +39,7 @@ var renderIconPath: String?
 var renderIconSize = 1024
 var renderIconsetDir: String?
 var renderDMGBackgroundDir: String?
+var renderSocialPath: String?
 var dmgSigned = false
 
 var args = Array(CommandLine.arguments.dropFirst())
@@ -62,6 +65,7 @@ while !args.isEmpty {
     case "--size": renderIconSize = Int(takeValue(a)) ?? 1024
     case "--render-iconset": renderIconsetDir = takeValue(a)
     case "--render-dmg-background": renderDMGBackgroundDir = takeValue(a)
+    case "--render-social": renderSocialPath = takeValue(a)
     case "--signed": dmgSigned = true
     case "--dump-bar": options.dumpBarPath = takeValue(a)
     case "--dump-chart":
@@ -192,6 +196,13 @@ if let dir = renderIconsetDir {
 if let dir = renderDMGBackgroundDir {
     do { try DMGBackground.write(to: dir, signed: dmgSigned); print("wrote \(dir)") }
     catch { fputs("dmg background: \(error)\n", stderr); exit(1) }
+    exit(0)
+}
+if let path = renderSocialPath {
+    do {
+        try SocialCard.write(to: path, icon: "docs/icon.png", screenshot: "docs/screenshot.png")
+        print("wrote \(path) (\(Int(SocialCard.width))×\(Int(SocialCard.height)))")
+    } catch { fputs("social card: \(error.localizedDescription)\n", stderr); exit(1) }
     exit(0)
 }
 if let path = renderIconPath {
