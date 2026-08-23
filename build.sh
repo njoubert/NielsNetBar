@@ -30,7 +30,7 @@ cd "$(dirname "$0")"
 NAME=NimbusNetBar          # executable / target / process name
 APP_NAME="Nimbus Net Bar"  # what the user sees: the .app, the volume, Login Items
 BUNDLE_ID=com.njoubert.nimbusnetbar
-VERSION=1.5.0
+VERSION=1.6.0
 INSTALL_DIR=/Applications
 INSTALLED="$INSTALL_DIR/$APP_NAME.app"
 DEV_APP="dist/debug/$APP_NAME.app"
