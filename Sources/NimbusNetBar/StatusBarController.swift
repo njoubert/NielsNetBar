@@ -1,6 +1,7 @@
 // Copyright (C) 2026 Niels Joubert
 // SPDX-License-Identifier: GPL-3.0-or-later
 import AppKit
+import NimbusUpdater
 
 /// The status item (two stacked lines of throughput) and its dropdown menu.
 @MainActor
@@ -17,8 +18,11 @@ final class StatusBarController: NSObject, NSMenuDelegate {
     private let item: NSStatusItem
     private let menu = NSMenu()
     private let monitor: NetworkMonitor
+    /// nil when this launch has no business updating anything (the `--dump-bar` run).
+    private let updater: Updater?
     private var snapshot = NetworkSnapshot()
     private var menuOpen = false
+    private var versionItem: NSMenuItem?
 
     // Rows that update live while the menu is open.
     /// The chart's natural width. It carries `autoresizingMask = [.width]`, so AppKit stretches
@@ -44,8 +48,9 @@ final class StatusBarController: NSObject, NSMenuDelegate {
     private var hiddenReasons: Set<String> = []
     private var observers: [(center: NotificationCenter, token: NSObjectProtocol)] = []
 
-    init(monitor: NetworkMonitor) {
+    init(monitor: NetworkMonitor, updater: Updater? = nil) {
         self.monitor = monitor
+        self.updater = updater
         item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         super.init()
         menu.delegate = self
@@ -174,6 +179,7 @@ final class StatusBarController: NSObject, NSMenuDelegate {
 
     func menuWillOpen(_ menu: NSMenu) {
         menuOpen = true
+        updater?.checkIfStale()
     }
 
     func menuDidClose(_ menu: NSMenu) {
@@ -273,6 +279,7 @@ final class StatusBarController: NSObject, NSMenuDelegate {
             login.toolTip = "This copy runs from \(Bundle.main.bundlePath). Registering it as a Login Item points the Login Item at this path — use ./build.sh install for the real thing."
         }
         menu.addItem(login)
+        addUpdateItems()
 
         let settings = NSMenuItem(title: "Open Network Settings…", action: #selector(openNetworkSettings), keyEquivalent: "")
         settings.target = self
@@ -284,15 +291,128 @@ final class StatusBarController: NSObject, NSMenuDelegate {
         let versionText = StatusBarController.versionString()
         let version = NSMenuItem(title: versionText, action: #selector(copyValue(_:)), keyEquivalent: "")
         version.target = self
-        version.representedObject = versionText
+        version.representedObject = versionText   // copy the version, not the update note
         version.toolTip = "Click to copy"
-        version.attributedTitle = NSAttributedString(string: versionText, attributes: [
-            .font: NSFont.menuFont(ofSize: NSFont.smallSystemFontSize),
-            .foregroundColor: NSColor.secondaryLabelColor])
         menu.addItem(version)
+        versionItem = version
+        updateVersionRow()
 
         let quit = NSMenuItem(title: "Quit Nimbus Net Bar", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
         menu.addItem(quit)
+    }
+
+    // MARK: Updates
+
+    /// Under "Launch at Login": what the updater has, if anything, and the two controls.
+    /// The same rows as nimbus-leviton-bar; the behaviour lives in NimbusUpdater.
+    private func addUpdateItems() {
+        guard let updater else { return }
+        switch updater.state {
+        case .ready(let release) where updater.canInstall:
+            let install = NSMenuItem(title: "Install Update \(release.version) and Relaunch",
+                                     action: #selector(installUpdate), keyEquivalent: "")
+            install.target = self
+            let firstLines = release.notes.split(separator: "\n").prefix(3).joined(separator: "\n")
+            install.toolTip = firstLines.isEmpty
+                ? "Downloaded and checked against this app's Developer ID. Installs in a few seconds."
+                : firstLines
+            menu.addItem(install)
+        case .available(let release):
+            let item = NSMenuItem(title: "Update \(release.version) Available…",
+                                  action: #selector(openUpdatePage), keyEquivalent: "")
+            item.target = self
+            item.toolTip = updater.canInstall
+                ? "That release has no installable download; this opens its page."
+                : "Updates install only into /Applications, and this copy runs from \(Bundle.main.bundlePath). Opens the release page."
+            menu.addItem(item)
+        case .downloading(let release):
+            let item = NSMenuItem(title: "Downloading \(release.version)…", action: nil, keyEquivalent: "")
+            item.isEnabled = false
+            menu.addItem(item)
+        case .installing:
+            let item = NSMenuItem(title: "Installing…", action: nil, keyEquivalent: "")
+            item.isEnabled = false
+            menu.addItem(item)
+        default:
+            break
+        }
+
+        let check = NSMenuItem(title: "Check for Updates…", action: #selector(checkForUpdates), keyEquivalent: "")
+        check.target = self
+        switch updater.state {
+        case .checking, .downloading, .installing: check.isEnabled = false
+        default: break
+        }
+        menu.addItem(check)
+
+        if updater.canInstall {
+            let auto = NSMenuItem(title: "Check for Updates Automatically",
+                                  action: #selector(toggleAutomaticUpdates(_:)), keyEquivalent: "")
+            auto.target = self
+            auto.state = updater.automaticChecks ? .on : .off
+            auto.toolTip = "Once a day, asks github.com for the newest release and downloads it."
+            menu.addItem(auto)
+        }
+    }
+
+    /// The updater moved. The menu is rebuilt on every open, so while it is open only the
+    /// version line changes — adding rows under the cursor is the thing to avoid.
+    func updaterChanged() {
+        guard menuOpen else { return }
+        updateVersionRow()
+    }
+
+    private func updateVersionRow() {
+        guard let item = versionItem else { return }
+        var text = StatusBarController.versionString()
+        if let updater, case .ready(let release) = updater.state { text += "  ·  \(release.version) ready" }
+        item.attributedTitle = NSAttributedString(string: text, attributes: [
+            .font: NSFont.menuFont(ofSize: NSFont.smallSystemFontSize),
+            .foregroundColor: NSColor.secondaryLabelColor])
+    }
+
+    @objc private func installUpdate() { updater?.installAndRelaunch() }
+
+    @objc private func openUpdatePage() { updater?.openReleasePage() }
+
+    @objc private func toggleAutomaticUpdates(_ sender: NSMenuItem) {
+        guard let updater else { return }
+        updater.automaticChecks.toggle()
+        sender.state = updater.automaticChecks ? .on : .off
+    }
+
+    /// The manual check always goes to the network and always says what happened.
+    @objc private func checkForUpdates() {
+        guard let updater else { return }
+        Task { @MainActor in
+            let state = await updater.checkNow()
+            let alert = NSAlert()
+            switch state {
+            case .ready(let release):
+                alert.messageText = "Update \(release.version) is ready"
+                alert.informativeText = "Choose \u{201C}Install Update \(release.version) and Relaunch\u{201D} in the menu."
+            case .available(let release):
+                alert.messageText = "Version \(release.version) is available"
+                alert.informativeText = updater.canInstall
+                    ? "That release has no installable download — open its page to get it."
+                    : "Updates install only into /Applications, and this copy runs from \(Bundle.main.bundlePath)."
+                alert.addButton(withTitle: "OK")
+                alert.addButton(withTitle: "Open Release Page")
+                NSApp.activate(ignoringOtherApps: true)
+                if alert.runModal() == .alertSecondButtonReturn { updater.openReleasePage() }
+                return
+            case .failed(let message, _):
+                alert.messageText = "Could not check for updates"
+                alert.informativeText = message
+                alert.alertStyle = .warning
+            default:
+                alert.messageText = "You\u{2019}re up to date"
+                alert.informativeText = "\(StatusBarController.versionString()) is the newest release."
+            }
+            alert.addButton(withTitle: "OK")
+            NSApp.activate(ignoringOtherApps: true)
+            alert.runModal()
+        }
     }
 
     // MARK: Interface rows
@@ -521,7 +641,7 @@ final class StatusBarController: NSObject, NSMenuDelegate {
 
     /// "Nimbus Net Bar v1.2 (23)" — marketing version plus the build number, which is the
     /// commit count, so a report pins down the exact source it came from.
-    private static func versionString() -> String {
+    static func versionString() -> String {
         let info = Bundle.main.infoDictionary
         let name = info?["CFBundleName"] as? String ?? "Nimbus Net Bar"
         guard let short = info?["CFBundleShortVersionString"] as? String else { return "\(name) — dev build" }

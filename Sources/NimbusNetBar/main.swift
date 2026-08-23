@@ -1,6 +1,7 @@
 // Copyright (C) 2026 Niels Joubert
 // SPDX-License-Identifier: GPL-3.0-or-later
 import AppKit
+import NimbusUpdater
 
 // Nimbus Net Bar — a menu bar network throughput monitor. See README.md.
 //
@@ -81,6 +82,40 @@ while !args.isEmpty {
             print("wrote \(path)")
         }
         exit(0)
+    case "--check-update":
+        // The updater's data path without the app around it: the feed, the parse, the
+        // comparison. Installing needs the real bundle, so it is not offered here.
+        guard let current = Updates.runningVersion ?? Updates.installedVersion else {
+            fputs("no version to compare against: \(Updates.appName) is not installed\n", stderr)
+            exit(1)
+        }
+        let config = Updates.config(currentVersion: current)
+        print("current: \(current)  (\(Updates.runningVersion != nil ? "this bundle" : "the installed copy"))")
+        let semaphore = DispatchSemaphore(value: 0)
+        nonisolated(unsafe) var outcome: Result<Release?, Error>?
+        Task {
+            do { outcome = .success(try await Release.fetchLatest(config)) }
+            catch { outcome = .failure(error) }
+            semaphore.signal()
+        }
+        semaphore.wait()
+        do {
+            guard let release = try outcome!.get() else {
+                print("latest:  none the updater can read"); exit(0)
+            }
+            print("latest:  \(release.version)  [\(release.tag)]")
+            if let asset = release.asset {
+                print("asset:   \(asset.name)  (\(asset.size) bytes)")
+            } else {
+                print("asset:   none named \(config.assetPrefix)\(release.version.text).zip — invisible to the updater")
+            }
+            print(release.version > current
+                ? (release.asset != nil ? "→ an update is available" : "→ newer, but nothing installable is published")
+                : "→ up to date")
+        } catch {
+            fputs("error: \(error)\n", stderr); exit(1)
+        }
+        exit(0)
     case "--print":
         // Text dump of what the menu would show, plus a one-second rate sample.
         let before = NetworkMonitor.readCounters()
@@ -150,7 +185,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let savedHz = UserDefaults.standard.double(forKey: StatusBarController.hzDefaultsKey)
         let hz = options.hz ?? (savedHz > 0 ? savedHz : 2)
         monitor = NetworkMonitor(interval: 1 / hz)
-        statusBar = StatusBarController(monitor: monitor)
+
+        // The updater, unless this launch is a screenshot run. It checks GitHub for a newer
+        // release (daily, and when the menu opens if the last check is stale), stages one
+        // that is signed by the same Developer ID as this copy, and waits for a click.
+        var updater: Updater?
+        if options.dumpBarPath == nil, let version = Updates.runningVersion {
+            let u = Updater(config: Updates.config(currentVersion: version))
+            u.onWillRelaunch = { [weak monitor] in monitor?.stop() }
+            updater = u
+        }
+        statusBar = StatusBarController(monitor: monitor, updater: updater)
+        updater?.onChange = { [weak self] in self?.statusBar.updaterChanged() }
+        updater?.start()
         monitor.start()
 
         // Login Item. `build.sh install` passes --enable-login-item; a drag-install from the

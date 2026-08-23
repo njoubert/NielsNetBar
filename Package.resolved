@@ -1,0 +1,15 @@
+{
+  "originHash" : "5697861471729a272de0a4df305c1364fc612c47ae05ad7b47363fe65e38b977",
+  "pins" : [
+    {
+      "identity" : "nimbus-updater",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/njoubert/nimbus-updater.git",
+      "state" : {
+        "revision" : "c4dbbd3ad4ed1f6ab0a01be0c1b510e6bc29962e",
+        "version" : "1.0.1"
+      }
+    }
+  ],
+  "version" : 3
+}

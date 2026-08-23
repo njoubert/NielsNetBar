@@ -34,6 +34,7 @@ Sources/NimbusNetBar/
                           SCDynamicStore (primary/router/DNS), service order
   WiFiInfo.swift          CoreWLAN details + LocationAccess (the SSID is gated on it)
   PublicIP.swift          ipify lookup, only when the menu opens, cached on success
+  Updates.swift           this app's UpdaterConfig for NimbusUpdater: repo, bundle id, team
   ChartView.swift         the 60 s bar chart in the menu
   Format.swift            number formatting (bits, SI, fixed-width for the bar)
   LoginItem.swift         SMAppService wrapper + the "registered once" default
@@ -112,9 +113,28 @@ Baselines on a Mac Studio (M-series, 32 interfaces, 2 Hz, menu closed, release b
 it was 2.7 %. `readCounters()` costs ~40 µs per call; a 500-iteration microbenchmark of a
 copy of the function is the way to check a change there.
 
+## Auto-update (NimbusUpdater)
+
+From 1.6.0 the app updates itself: `NimbusUpdater` (`../nimbus-updater`, MIT, ours; its
+CLAUDE.md holds the updater's traps) checks this repo's releases daily, stages one signed by
+the same Developer ID as the running copy, and installs it when the user clicks. Identical to
+nimbus-leviton-bar's — the menu glue in `StatusBarController.addUpdateItems` is the same code
+either side, so fix bugs in both.
+
+- **A release is invisible to the updater unless it carries `NimbusNetBar-<version>.zip`**,
+  built by `build.sh dmg` from the *stapled* app. `./build.sh release NOTES.md` does the whole
+  dance and cannot forget it.
+- `--check-update` prints what the updater sees; it also catches a stale checkout, which is how
+  this repo's being six commits behind was noticed.
+- Testing without publishing: `defaults write com.njoubert.nimbusnetbar updateFeedURL
+  file:///tmp/latest.json` (a JSON in the API's shape whose asset URL is a local `file://`
+  zip), then `defaults delete` it. **An empty update cache is not proof of a refusal** — the
+  launch check honours the daily interval, so force it with "Check for Updates…".
+
 ## Release and distribution
 
-The deliverable is the disk image. Nothing is automated beyond `build.sh dmg`; a release is:
+The deliverable is the disk image *and the zip beside it*. `./build.sh release NOTES.md` is
+the way in from 1.6.0; the manual steps below still describe what it does:
 
 1. **Version.** `VERSION=` near the top of `build.sh` is the marketing version
    (`CFBundleShortVersionString`, the DMG's file name). `CFBundleVersion` is
@@ -144,9 +164,11 @@ The deliverable is the disk image. Nothing is automated beyond `build.sh dmg`; a
 
 What a recipient gets: the DMG holds the app, an Applications alias, a background with the
 instructions and the Login Item / Location notes, and a hidden `.LICENSE`; the bundle
-itself also carries `Contents/Resources/LICENSE`. The app phones home only to
-`api.ipify.org`/`api6.ipify.org`, only when the menu is open — keep it that way and keep
-README saying so; it's what reviewers of a menu bar tool look for.
+itself also carries `Contents/Resources/LICENSE`. The app phones home to
+`api.ipify.org`/`api6.ipify.org`, only when the menu is open, and — unless the user turns off
+*Check for Updates Automatically* — to `api.github.com` plus
+`release-assets.githubusercontent.com` for the auto-updater. Nothing else, ever; keep it that
+way and keep README saying so, because it's what reviewers of a menu bar tool look for.
 
 **Signing.** `build.sh` reads `SIGN_IDENTITY` / `NOTARY_PROFILE` from a git-ignored
 `.signing` file (or the environment). The notary credentials are per Apple ID + team, not per

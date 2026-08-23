@@ -88,8 +88,18 @@ MAC, and for Wi-Fi the **SSID** and security, **signal** (RSSI / noise / SNR), c
 width and PHY mode. The primary interface also shows the **gateway** and **DNS** servers.
 **Click any row to copy its value** (IP, SSID, MAC, …).
 
-Below that: the update-rate submenu, a **Launch at Login** checkbox, a shortcut to Network
-Settings, Quit.
+Below that: the update-rate submenu, a **Launch at Login** checkbox, the update items, a
+shortcut to Network Settings, Quit.
+
+**Updates** — the app keeps itself current. Once a day, and when you open the menu if the last
+check is stale, it looks for a newer release; when it finds one it downloads it in the
+background and the menu offers **Install Update 1.6.0 and Relaunch**, which takes a couple of
+seconds. A download is installed only if macOS confirms it is signed by the same Developer ID
+as the running copy, so a tampered download is refused rather than installed, and nothing is
+installed without your click. **Check for Updates…** asks straight away; **Check for Updates
+Automatically** turns the daily check off, and with it off the app never contacts GitHub. Those
+requests carry no personal information — only the app's name and version. A copy that is not
+installed in `/Applications` never replaces itself; it links to the release page instead.
 
 Hardware ports come from System Configuration (the same list as System Settings, so a
 Mac Studio shows its four Thunderbolt ports, grey until something is plugged in). VPN
