@@ -1,7 +1,8 @@
 # Nimbus Net Bar — notes for agents
 
 A macOS menu bar network monitor in Swift: live ↑/↓ throughput in the bar, every
-interface's details in the dropdown. Pure SwiftPM, no dependencies, no Xcode project.
+interface's details in the dropdown. Pure SwiftPM, no Xcode project, and exactly one
+dependency — `NimbusUpdater` (https://github.com/njoubert/nimbus-updater, MIT, ours).
 `README.md` is the user-facing description of what it shows and how it works — read it
 first and keep it true when behaviour changes. This file is the rest: how to work here,
 how to measure, and the traps already found.
@@ -115,11 +116,23 @@ copy of the function is the way to check a change there.
 
 ## Auto-update (NimbusUpdater)
 
-From 1.6.0 the app updates itself: `NimbusUpdater` (`../nimbus-updater`, MIT, ours; its
-CLAUDE.md holds the updater's traps) checks this repo's releases daily, stages one signed by
-the same Developer ID as the running copy, and installs it when the user clicks. Identical to
-nimbus-leviton-bar's — the menu glue in `StatusBarController.addUpdateItems` is the same code
-either side, so fix bugs in both.
+From 1.6.0 the app updates itself: `NimbusUpdater` checks this repo's releases daily, stages
+one signed by the same Developer ID as the running copy, and installs it when the user clicks.
+**Its own CLAUDE.md (`../nimbus-updater/CLAUDE.md`) holds the updater's traps — read it before
+touching anything about updates.** Identical to nimbus-leviton-bar's: the menu glue in
+`StatusBarController.addUpdateItems` is the same code either side, so fix bugs in both.
+
+- **How it is wired in: an ordinary SwiftPM package dependency, by URL.** `Package.swift` has
+  `.package(url: "https://github.com/njoubert/nimbus-updater.git", from: "1.0.0")` and the
+  target takes `.product(name: "NimbusUpdater", package: "nimbus-updater")`. **Not a git
+  submodule, and not a path dependency** — the checkout beside this repo is only where the
+  source is edited, never what gets built. SwiftPM clones it into `.build/checkouts/` and the
+  committed `Package.resolved` pins the version and revision, so a new upstream tag arrives
+  only when someone runs `swift package update` and commits the result.
+- **Changing the updater means two repos:** edit `../nimbus-updater`, `swift test`, tag, push,
+  then `swift package update nimbus-updater` here and commit `Package.resolved`. To try a
+  change before tagging, temporarily use `.package(path: "../nimbus-updater")` — never commit
+  that, it breaks any clone without a sibling checkout.
 
 - **A release is invisible to the updater unless it carries `NimbusNetBar-<version>.zip`**,
   built by `build.sh dmg` from the *stapled* app. `./build.sh release NOTES.md` does the whole

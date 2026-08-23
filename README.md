@@ -7,7 +7,8 @@
 <p align="center">
   A menu bar network monitor for macOS, in Swift. Live ↑/↓ throughput in the bar; every
   interface's state, addresses, link speed and Wi-Fi details in the dropdown.<br>
-  No Dock icon, no window, no dependencies.
+  No Dock icon, no window. One dependency: our own
+  <a href="https://github.com/njoubert/nimbus-updater">nimbus-updater</a>, which keeps it up to date.
 </p>
 
 <p align="center">
@@ -91,7 +92,10 @@ width and PHY mode. The primary interface also shows the **gateway** and **DNS**
 Below that: the update-rate submenu, a **Launch at Login** checkbox, the update items, a
 shortcut to Network Settings, Quit.
 
-**Updates** — the app keeps itself current. Once a day, and when you open the menu if the last
+**Updates** — the app keeps itself current, through
+[nimbus-updater](https://github.com/njoubert/nimbus-updater) (MIT, shared with
+[Nimbus Leviton Bar](https://github.com/njoubert/nimbus-leviton-bar); it is a normal SwiftPM
+package dependency, pinned in `Package.resolved`). Once a day, and when you open the menu if the last
 check is stale, it looks for a newer release; when it finds one it downloads it in the
 background and the menu offers **Install Update 1.6.0 and Relaunch**, which takes a couple of
 seconds. A download is installed only if macOS confirms it is signed by the same Developer ID
